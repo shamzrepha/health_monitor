@@ -1,77 +1,43 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Health Dashboard</title>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <title>Health Monitor Dashboard</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    body { font-family: Arial, sans-serif; margin: 30px; background:#f6f9fb;}
+    .current-box { background: #fff; max-width: 700px; margin:1em auto 2em auto; border-radius: 14px; box-shadow: 0 2px 8px #0001; padding: 1.2em 2.5em;}
+    .current-row { display: flex; justify-content: space-between; align-items: center;}
+    .current-label { font-weight: bold; color: #555;}
+    .current-value { font-size: 2em; color: #2196f3;}
+    #chartDiv { max-width: 700px; margin: 0 auto 2em auto; background: #fff; border-radius: 14px; box-shadow: 0 2px 8px #0001; padding: 1.2em 2.5em;}
+    #controls { display: flex; gap: 1em; flex-wrap: wrap; align-items:center; margin-bottom: 10px;}
+    #readingList { max-width: 700px; margin: 0 auto; background: #fff; border-radius: 14px; box-shadow: 0 2px 8px #0001; padding: 1.2em 2.5em;}
+    #readingList h3 {margin-top:0;}
+    #readings {height:150px;overflow-y:auto;}
+    label {font-weight: 600;}
+    input[type="date"] {padding: 2px 8px;}
+    select {padding: 2px 8px;}
+  </style>
 </head>
 <body>
-  <h1>Patient Health Monitoring</h1>
-  <label for="chart-date">Select Date:</label>
-  <input type="date" id="chart-date">
-  <select id="range">
-    <option value="hour">Hourly</option>
-    <option value="day" selected>Daily</option>
-    <option value="week">Weekly</option>
-    <option value="month">Monthly</option>
-  </select>
-  <button onclick="loadChart()">Update Chart</button>
-  <canvas id="healthChart" width="800" height="350"></canvas>
-  <script>
-    // Set default date to today
-    document.getElementById('chart-date').valueAsDate = new Date();
+  <h1 style="text-align:center;">Health Monitor Dashboard</h1>
+  <div class="current-box">
+    <div class="current-row">
+      <span class="current-label">Temperature:</span>
+      <span id="currentTemp" class="current-value">-- °C</span>
+      <span class="current-label">Humidity:</span>
+      <span id="currentHum" class="current-value">-- %</span>
+      <span class="current-label">Pulse:</span>
+      <span id="currentPulse" class="current-value">--</span>
+    </div>
+    <div class="current-row" style="font-size:0.95em; color:#888; margin-top:0.5em;">
+      <span>Last updated: <span id="currentTime">--</span></span>
+    </div>
+  </div>
 
-    async function loadChart() {
-      const date = document.getElementById('chart-date').value;
-      const range = document.getElementById('range').value;
-      const resp = await fetch(`/api/chartdata/patient1?range=${range}&date=${date}`);
-      const data = await resp.json();
-
-      const labels = data.map(d => {
-        const dt = new Date(d.timestamp);
-        if (range === "hour") {
-          return dt.getHours() + ':' + dt.getMinutes().toString().padStart(2, '0');
-        } else if (range === "day") {
-          return dt.getHours() + ":00";
-        } else if (range === "week" || range === "month") {
-          return dt.toLocaleDateString();
-        }
-        return dt.toLocaleString();
-      });
-
-      const temp = data.map(d => d.temperature);
-      const hr = data.map(d => d.heart_rate);
-      const spo2 = data.map(d => d.spo2);
-
-      chart.data.labels = labels;
-      chart.data.datasets[0].data = temp;
-      chart.data.datasets[1].data = hr;
-      chart.data.datasets[2].data = spo2;
-      chart.update();
-    }
-
-    const ctx = document.getElementById('healthChart').getContext('2d');
-    const chart = new Chart(ctx, {
-      type: 'line',
-      data: {
-        labels: [],
-        datasets: [
-          { label: 'Temperature (°C)', borderColor: 'red', data: [], fill: false, yAxisID: 'y' },
-          { label: 'Heart Rate (bpm)', borderColor: 'blue', data: [], fill: false, yAxisID: 'y1' },
-          { label: 'SpO₂ (%)', borderColor: 'green', data: [], fill: false, yAxisID: 'y2' }
-        ]
-      },
-      options: {
-        responsive: false,
-        scales: {
-          y: { type: 'linear', display: true, position: 'left', title: { display: true, text: 'Temp (°C)' } },
-          y1: { type: 'linear', display: true, position: 'right', title: { display: true, text: 'Heart Rate (bpm)' }, grid: { drawOnChartArea: false } },
-          y2: { type: 'linear', display: false }
-        }
-      }
-    });
-
-    loadChart();
-    setInterval(loadChart, 60000); // Refresh every minute
-  </script>
-</body>
-</html>
+  <div id="chartDiv">
+    <div id="controls">
+      <label for="dataType">Chart:</label>
+      <select id="dataType">
+        <option value="temp">Temperature (°C)</option>
+        <option
