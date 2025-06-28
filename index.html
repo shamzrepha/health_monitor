@@ -1,161 +1,77 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>ESP8266 Firebase Temp Dashboard</title>
-  <style>
-    body { font-family: Arial, sans-serif; margin: 30px; background: #f6f9fb; }
-    #currentTemp {
-      font-size: 3em;
-      font-weight: bold;
-      color: #2196f3;
-      text-align: center;
-      margin-bottom: 10px;
-    }
-    #liveChartDiv, #chartDiv { max-width: 600px; margin: 0 auto 30px auto; background: #fff; padding: 20px 25px 10px 25px; border-radius: 16px; box-shadow: 0 2px 8px #0001;}
-    #liveChartDiv {margin-bottom: 20px;}
-    #readingList { margin: 20px auto 0 auto; max-width: 600px; background: #fff; border-radius: 16px; box-shadow: 0 2px 8px #0001; padding: 10px 25px 10px 25px;}
-    #readingList h3 { margin-top: 0;}
-    #readings { height: 120px; overflow-y: auto; }
-    ul { padding-left: 18px; }
-  </style>
+  <title>Health Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
-  <h1 style="text-align:center;">ESP8266 Firebase Temperature Dashboard</h1>
-  <div id="currentTemp">Current: -- °C</div>
-  <div id="liveChartDiv">
-    <canvas id="liveTempChart" width="560" height="110"></canvas>
-  </div>
-  <div id="chartDiv">
-    <canvas id="tempChart" width="560" height="250"></canvas>
-  </div>
-  <div id="readingList">
-    <h3>Recent Readings:</h3>
-    <ul id="readings"></ul>
-  </div>
-  <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-app.js";
-    import { getDatabase, ref, onValue, query, limitToLast } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-database.js";
-    import Chart from "https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js";
+  <h1>Patient Health Monitoring</h1>
+  <label for="chart-date">Select Date:</label>
+  <input type="date" id="chart-date">
+  <select id="range">
+    <option value="hour">Hourly</option>
+    <option value="day" selected>Daily</option>
+    <option value="week">Weekly</option>
+    <option value="month">Monthly</option>
+  </select>
+  <button onclick="loadChart()">Update Chart</button>
+  <canvas id="healthChart" width="800" height="350"></canvas>
+  <script>
+    // Set default date to today
+    document.getElementById('chart-date').valueAsDate = new Date();
 
-    // Firebase config - your project
-    const firebaseConfig = {
-      apiKey: "AIzaSyDssbC1dIiDmACxzSs9Kn-vA-cRT3MLKzk",
-      authDomain: "healthmonitorapp-47655.firebaseapp.com",
-      databaseURL: "https://healthmonitorapp-47655-default-rtdb.firebaseio.com",
-      projectId: "healthmonitorapp-47655",
-      storageBucket: "healthmonitorapp-47655.appspot.com",
-      messagingSenderId: "831668449943",
-      appId: "1:831668449943:web:b9ae8fdd50de8fc4d2efd2",
-      measurementId: "G-BPCV50PSCF"
-    };
+    async function loadChart() {
+      const date = document.getElementById('chart-date').value;
+      const range = document.getElementById('range').value;
+      const resp = await fetch(`/api/chartdata/patient1?range=${range}&date=${date}`);
+      const data = await resp.json();
 
-    // Firebase init
-    const app = initializeApp(firebaseConfig);
-    const db = getDatabase(app);
-
-    // Chart.js setup for live current value
-    let liveChart;
-    let liveChartData = Array(20).fill(null); // 20 points for last 100 sec (5 sec per point)
-    let liveChartLabels = Array(20).fill(''); // Labels not shown
-    window.addEventListener('DOMContentLoaded', () => {
-      // Live chart for current value
-      const liveCtx = document.getElementById('liveTempChart').getContext('2d');
-      liveChart = new Chart(liveCtx, {
-        type: 'line',
-        data: {
-          labels: liveChartLabels,
-          datasets: [{
-            label: 'Live Reading',
-            data: liveChartData,
-            borderColor: '#4caf50',
-            backgroundColor: 'rgba(76,175,80,0.08)',
-            pointRadius: 2,
-            fill: true,
-            tension: 0.3
-          }]
-        },
-        options: {
-          animation: false,
-          plugins: { legend: { display: false } },
-          scales: {
-            x: { display: false },
-            y: { min: 15, max: 45, ticks: { stepSize: 5 } }
-          }
+      const labels = data.map(d => {
+        const dt = new Date(d.timestamp);
+        if (range === "hour") {
+          return dt.getHours() + ':' + dt.getMinutes().toString().padStart(2, '0');
+        } else if (range === "day") {
+          return dt.getHours() + ":00";
+        } else if (range === "week" || range === "month") {
+          return dt.toLocaleDateString();
         }
+        return dt.toLocaleString();
       });
-    });
 
-    // Chart.js setup for history chart
-    let chart;
-    let chartLabels = [];
-    let chartData = [];
-    window.addEventListener('DOMContentLoaded', () => {
-      const ctx = document.getElementById('tempChart').getContext('2d');
-      chart = new Chart(ctx, {
-        type: 'line',
-        data: {
-          labels: chartLabels,
-          datasets: [{
-            label: 'Temperature (°C)',
-            data: chartData,
-            borderColor: '#2196f3',
-            backgroundColor: 'rgba(33,150,243,0.08)',
-            fill: true,
-            tension: 0.13,
-            pointRadius: 2,
-          }]
-        },
-        options: {
-          animation: false,
-          responsive: false,
-          plugins: { legend: { display: true } },
-          scales: {
-            x: { title: { display: true, text: 'Reading' } },
-            y: { title: { display: true, text: 'Temperature (°C)' }, min: 15, max: 45 }
-          }
+      const temp = data.map(d => d.temperature);
+      const hr = data.map(d => d.heart_rate);
+      const spo2 = data.map(d => d.spo2);
+
+      chart.data.labels = labels;
+      chart.data.datasets[0].data = temp;
+      chart.data.datasets[1].data = hr;
+      chart.data.datasets[2].data = spo2;
+      chart.update();
+    }
+
+    const ctx = document.getElementById('healthChart').getContext('2d');
+    const chart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: [],
+        datasets: [
+          { label: 'Temperature (°C)', borderColor: 'red', data: [], fill: false, yAxisID: 'y' },
+          { label: 'Heart Rate (bpm)', borderColor: 'blue', data: [], fill: false, yAxisID: 'y1' },
+          { label: 'SpO₂ (%)', borderColor: 'green', data: [], fill: false, yAxisID: 'y2' }
+        ]
+      },
+      options: {
+        responsive: false,
+        scales: {
+          y: { type: 'linear', display: true, position: 'left', title: { display: true, text: 'Temp (°C)' } },
+          y1: { type: 'linear', display: true, position: 'right', title: { display: true, text: 'Heart Rate (bpm)' }, grid: { drawOnChartArea: false } },
+          y2: { type: 'linear', display: false }
         }
-      });
-    });
-
-    // Update current temperature and live chart
-    const tempRef = ref(db, '/sensors/device1/temperature');
-    onValue(tempRef, (snapshot) => {
-      const temp = snapshot.val();
-      if (temp !== null) {
-        document.getElementById('currentTemp').textContent = `Current: ${temp} °C`;
-
-        // Shift live chart data, add new temp
-        liveChartData.push(temp);
-        if (liveChartData.length > 20) liveChartData.shift();
-        liveChart.update();
       }
     });
 
-    // Update chart and list with last 20 readings
-    const historyRef = query(ref(db, '/sensors/device1/history'), limitToLast(20));
-    onValue(historyRef, (snapshot) => {
-      const vals = [];
-      const readingsUl = document.getElementById('readings');
-      readingsUl.innerHTML = '';
-      if (snapshot.exists()) {
-        snapshot.forEach(childSnap => {
-          const temp = childSnap.val();
-          vals.push(temp);
-          const li = document.createElement('li');
-          li.textContent = `${temp} °C`;
-          readingsUl.appendChild(li);
-        });
-        // Update chart data
-        chartLabels.length = 0;
-        chartData.length = 0;
-        vals.forEach((val, idx) => {
-          chartLabels.push(idx + 1);
-          chartData.push(val);
-        });
-        chart.update();
-      }
-    });
+    loadChart();
+    setInterval(loadChart, 60000); // Refresh every minute
   </script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </body>
 </html>
