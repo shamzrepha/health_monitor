@@ -25,10 +25,25 @@
       box-shadow: 0 2px 5px rgba(0,0,0,0.1);
     }
     canvas { margin-top: 10px; }
+    .sos-alert {
+      position: fixed;
+      top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(255, 0, 0, 0.9);
+      color: white; display: flex; align-items: center; justify-content: center;
+      font-size: 2rem; font-weight: bold; z-index: 9999;
+      animation: flash 1s infinite;
+    }
+    @keyframes flash {
+      0% { opacity: 1; }
+      50% { opacity: 0.5; }
+      100% { opacity: 1; }
+    }
   </style>
 </head>
 <body>
   <h1>Live Health Monitor</h1>
+
+  <div id="sosBanner" class="sos-alert" style="display:none;">🚨 SOS TRIGGERED! 🚨</div>
 
   <div class="live-data">
     <span id="live-temp">Temp: --°C</span>
@@ -75,10 +90,22 @@
     firebase.initializeApp(firebaseConfig);
     const db = firebase.database();
 
+    const chartOptions = color => ({
+      type: 'bar',
+      data: { labels: [], datasets: [{ label: '', data: [], backgroundColor: color }] },
+      options: {
+        responsive: true,
+        scales: {
+          x: { title: { display: true, text: 'Time/Day' } },
+          y: { beginAtZero: true }
+        }
+      }
+    });
+
     const charts = {
-      temp: new Chart(document.getElementById('chartTemp'), makeChartConfig('Temp (°C)', 'red', 0, 60)),
-      bpm: new Chart(document.getElementById('chartBPM'), makeChartConfig('BPM', 'blue', 0, 200)),
-      co2: new Chart(document.getElementById('chartCO2'), makeChartConfig('sCO₂ (%)', 'green', 0, 100))
+      temp: new Chart(document.getElementById('chartTemp'), chartOptions('red')),
+      bpm: new Chart(document.getElementById('chartBPM'), chartOptions('blue')),
+      co2: new Chart(document.getElementById('chartCO2'), chartOptions('green'))
     };
 
     const viewSelect = document.getElementById('viewRange');
@@ -96,49 +123,63 @@
       document.getElementById('live-temp').textContent = `Temp: ${data.temp}°C`;
       document.getElementById('live-bpm').textContent = `BPM: ${data.bpm}`;
       document.getElementById('live-co2').textContent = `sCO₂: ${data.sco2}%`;
-    });
 
-    function makeChartConfig(label, color, min, max) {
-      return {
-        type: 'line',
-        data: { labels: [], datasets: [{ label: label, data: [], borderColor: color, fill: false }] },
-        options: {
-          responsive: true,
-          scales: {
-            x: { title: { display: true, text: 'Time' } },
-            y: { min, max, beginAtZero: true }
-          }
-        }
-      };
-    }
+      if (data.sos === true) {
+        document.getElementById('sosBanner').style.display = 'flex';
+        const audio = new Audio('https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg');
+        audio.play();
+      } else {
+        document.getElementById('sosBanner').style.display = 'none';
+      }
+    });
 
     async function loadData() {
       const now = new Date();
       const view = viewSelect.value;
-      const snap = await db.ref('readings').orderByChild('timestamp').limitToLast(1000).get();
+      const snap = await db.ref('readings').orderByChild('timestamp').limitToLast(300).get();
 
-      const labels = [], temps = [], bpms = [], co2s = [];
+      const groups = {};
+
       snap.forEach(child => {
         const data = child.val();
         const ts = new Date(data.timestamp);
-        const timeLabel = ts.toLocaleTimeString();
 
         if (view === '1min') {
           if ((now - ts) > 60000) return;
-        } else if (view === 'day' && ts.toDateString() !== now.toDateString()) return;
-        else if (view === 'week') {
+          const slot = Math.floor((now - ts) / 5000);
+          const label = `${12 - slot}s ago`;
+          groups[label] = groups[label] || [];
+          groups[label].push(data);
+        } else if (view === 'day') {
+          if (ts.toDateString() !== now.toDateString()) return;
+          const hour = ts.getHours();
+          groups[hour] = groups[hour] || [];
+          groups[hour].push(data);
+        } else if (view === 'week') {
           const weekAgo = new Date();
           weekAgo.setDate(now.getDate() - 7);
           if (ts < weekAgo) return;
+          const weekday = ts.toLocaleDateString(undefined, { weekday: 'short' });
+          groups[weekday] = groups[weekday] || [];
+          groups[weekday].push(data);
         } else if (view === 'month') {
           const selected = new Date(monthPicker.value);
           if (!monthPicker.value || ts.getMonth() !== selected.getMonth() || ts.getFullYear() !== selected.getFullYear()) return;
+          const day = ts.getDate();
+          groups[day] = groups[day] || [];
+          groups[day].push(data);
         }
+      });
 
-        labels.push(timeLabel);
-        temps.push(parseFloat(data.temp));
-        bpms.push(parseInt(data.bpm));
-        co2s.push(parseFloat(data.sco2));
+      const labels = Object.keys(groups).sort();
+      const temps = [], bpms = [], co2s = [];
+
+      labels.forEach(label => {
+        const group = groups[label];
+        const avg = arr => arr.reduce((a, b) => a + parseFloat(b || 0), 0) / arr.length;
+        temps.push(avg(group.map(x => x.temp)).toFixed(1));
+        bpms.push(avg(group.map(x => x.bpm)).toFixed(1));
+        co2s.push(avg(group.map(x => x.sco2)).toFixed(1));
       });
 
       updateChart(charts.temp, labels, temps);
