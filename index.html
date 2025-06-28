@@ -460,15 +460,17 @@
       historyTableSection.style.display = readings.length ? "block" : "none";
     }
 
-    // Real-time update for live cards and SOS
-    db.ref('readings').limitToLast(1).on('child_added', snapshot => {
-      const data = snapshot.val();
-      sosKey = snapshot.key;
-      if (!data) return;
-      document.getElementById('live-temp').textContent = (data.temp ? data.temp : "--") + " °C";
-      document.getElementById('live-bpm').textContent = data.bpm ? data.bpm : "--";
-      document.getElementById('live-co2').textContent = (data.sco2 ? data.sco2 : "--") + " %";
-      if (data.sos === true && data.sos_ack !== true) {
+    // Live value update and SOS
+    db.ref('readings').limitToLast(1).on('value', snap => {
+      if (!snap.exists()) return;
+      let lastData;
+      snap.forEach(child => { lastData = child.val(); });
+      if (!lastData) return;
+      document.getElementById('live-temp').textContent = (lastData.temp ? lastData.temp : "--") + " °C";
+      document.getElementById('live-bpm').textContent = lastData.bpm ? lastData.bpm : "--";
+      document.getElementById('live-co2').textContent = (lastData.sco2 ? lastData.sco2 : "--") + " %";
+      sosKey = Object.keys(snap.val())[0];
+      if (lastData.sos === true && lastData.sos_ack !== true) {
         showSOS();
       } else {
         hideSOS();
@@ -494,17 +496,13 @@
       }
     };
 
-    // Real-time update for charts (NEW!)
-    db.ref('readings').on('child_added', function(snapshot) {
-      loadData();
-    });
+    db.ref('readings').on('value', function() { loadData(); });
 
     async function loadData() {
       const now = new Date();
       const view = viewSelect.value;
       const history = historyDate.value;
 
-      // ----------- PATIENT HISTORY MODE -----------
       if (history) {
         monthPicker.style.display = "none";
         const [yyyy, mm, dd] = history.split('-').map(Number);
@@ -543,11 +541,9 @@
         historyTableSection.style.display = "none";
       }
 
-      // ----------- ALWAYS GET THE LAST 30 READINGS FOR CHARTS (so even if you just started, you see something!) -----------
       const snap = await db.ref('readings').orderByChild('timestamp').limitToLast(30).get();
       let readings = [];
       if (snap.exists()) snap.forEach(child => readings.push(child.val()));
-
       if (readings.length === 0) {
         updateChart(charts.temp, [], [], "#fbbc05", "#e53935");
         updateChart(charts.bpm, [], [], "#45b1e7", "#1976d2");
@@ -555,9 +551,7 @@
         return;
       }
 
-      // ----------- LIVE (1MIN) MODE -----------
       if (view === '1min') {
-        // Group the last 30 readings into 12 slots (5s each, ~1min), fallback to plotting all if not enough
         const nowTs = Date.now();
         const slots = Array.from({length:12}, (_,i)=>nowTs - (11-i)*5000);
         const barData = Array.from({length:12}, ()=>[]);
@@ -580,7 +574,6 @@
         return;
       }
 
-      // ----------- TODAY MODE -----------
       if (view === "day") {
         let bars = Array.from({length:24}, ()=>[]);
         readings.forEach(data => {
@@ -598,7 +591,6 @@
         return;
       }
 
-      // ----------- WEEK MODE -----------
       if (view==="week") {
         let weekAgo = new Date(now);
         weekAgo.setHours(0,0,0,0);
@@ -626,7 +618,6 @@
         return;
       }
 
-      // ----------- MONTH MODE -----------
       if (view==="month") {
         if (!monthPicker.value) {
           updateChart(charts.temp, [], [], "#fbbc05", "#e53935");
@@ -653,29 +644,26 @@
         return;
       }
 
-      // ----------- FALLBACK: SHOW LAST 30 READINGS AS LINES -----------
-      {
-        ["temp", "bpm", "co2"].forEach((key, idx) => {
-          const chart = charts[key];
-          if (chart.config.type !== 'line') {
-            chart.config.type = 'line';
-            chart.options.scales.x.type = "category";
-          }
-        });
-        const labels = readings.map(d => {
-          const t = new Date(d.timestamp);
-          return t.toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", second: "2-digit"});
-        });
-        const temps = readings.map(d => d.temp !== undefined ? parseFloat(d.temp) : 0);
-        const bpms = readings.map(d => d.bpm !== undefined ? parseFloat(d.bpm) : 0);
-        const co2s = readings.map(d => d.sco2 !== undefined ? parseFloat(d.sco2) : 0);
-        updateChart(charts.temp, labels, temps, "#fbbc05", "#e53935");
-        updateChart(charts.bpm, labels, bpms, "#45b1e7", "#1976d2");
-        updateChart(charts.co2, labels, co2s, "#4caf50", "#009688");
-      }
+      // fallback: last 30 readings as lines
+      ["temp", "bpm", "co2"].forEach((key, idx) => {
+        const chart = charts[key];
+        if (chart.config.type !== 'line') {
+          chart.config.type = 'line';
+          chart.options.scales.x.type = "category";
+        }
+      });
+      const labels = readings.map(d => {
+        const t = new Date(d.timestamp);
+        return t.toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", second: "2-digit"});
+      });
+      const temps = readings.map(d => d.temp !== undefined ? parseFloat(d.temp) : 0);
+      const bpms = readings.map(d => d.bpm !== undefined ? parseFloat(d.bpm) : 0);
+      const co2s = readings.map(d => d.sco2 !== undefined ? parseFloat(d.sco2) : 0);
+      updateChart(charts.temp, labels, temps, "#fbbc05", "#e53935");
+      updateChart(charts.bpm, labels, bpms, "#45b1e7", "#1976d2");
+      updateChart(charts.co2, labels, co2s, "#4caf50", "#009688");
     }
 
-    // No setInterval! Real-time only.
     loadData();
   </script>
 </body>
