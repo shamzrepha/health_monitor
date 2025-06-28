@@ -1,35 +1,109 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>ESP Sensor Dashboard</title>
+  <title>ESP8266 Firebase Temp Dashboard</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 30px; }
+    #currentTemp { font-size: 2em; font-weight: bold; color: #2196f3; }
+    #readingList { margin: 20px 0; }
+    #readingList ul { padding-left: 20px; }
+    #chartDiv { max-width: 600px; }
+  </style>
 </head>
 <body>
-  <h1>ESP Sensor Value:</h1>
-  <div id="sensorValue">Loading...</div>
+  <h1>ESP8266 Firebase Temperature Dashboard</h1>
+  <div id="currentTemp">Current: -- °C</div>
+  <div id="readingList">
+    <h3>Recent Readings:</h3>
+    <ul id="readings"></ul>
+  </div>
+  <div id="chartDiv">
+    <canvas id="tempChart" width="600" height="350"></canvas>
+  </div>
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-app.js";
-    import { getDatabase, ref, onValue } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-database.js";
+    import { getDatabase, ref, onValue, query, limitToLast } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-database.js";
+    import Chart from "https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js";
 
+    // Firebase config - your project
     const firebaseConfig = {
-      apiKey: "AIzaSyBBAvRnaZxvYqy3tj7rJ--EYojSH8wQHMY",
-      authDomain: "heal-9faa0.firebaseapp.com",
-      projectId: "heal-9faa0",
-      storageBucket: "heal-9faa0.firebasestorage.app",
-      messagingSenderId: "265082548829",
-      appId: "1:265082548829:web:3aededa684fa98a17ed3b4",
-      measurementId: "G-P7TNMCCYJ0",
-      databaseURL: "https://heal-9faa0-default-rtdb.firebaseio.com"
+      apiKey: "AIzaSyDssbC1dIiDmACxzSs9Kn-vA-cRT3MLKzk",
+      authDomain: "healthmonitorapp-47655.firebaseapp.com",
+      databaseURL: "https://healthmonitorapp-47655-default-rtdb.firebaseio.com",
+      projectId: "healthmonitorapp-47655",
+      storageBucket: "healthmonitorapp-47655.appspot.com",
+      messagingSenderId: "831668449943",
+      appId: "1:831668449943:web:b9ae8fdd50de8fc4d2efd2",
+      measurementId: "G-BPCV50PSCF"
     };
 
+    // Firebase init
     const app = initializeApp(firebaseConfig);
     const db = getDatabase(app);
 
-    const valueDiv = document.getElementById('sensorValue');
-    const valueRef = ref(db, '/sensors/device1/value');
+    // Chart.js setup
+    let chart;
+    let chartLabels = [];
+    let chartData = [];
+    window.addEventListener('DOMContentLoaded', () => {
+      const ctx = document.getElementById('tempChart').getContext('2d');
+      chart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: chartLabels,
+          datasets: [{
+            label: 'Temperature (°C)',
+            data: chartData,
+            borderColor: '#2196f3',
+            fill: false,
+            tension: 0.1
+          }]
+        },
+        options: {
+          animation: false,
+          responsive: false,
+          scales: {
+            x: { title: { display: true, text: 'Reading' } },
+            y: { title: { display: true, text: 'Temperature (°C)' }, min: 15, max: 45 }
+          }
+        }
+      });
+    });
 
-    onValue(valueRef, (snapshot) => {
-      valueDiv.innerText = snapshot.exists() ? snapshot.val() : "No data";
+    // Update current temperature
+    const tempRef = ref(db, '/sensors/device1/temperature');
+    onValue(tempRef, (snapshot) => {
+      const temp = snapshot.val();
+      if (temp !== null) {
+        document.getElementById('currentTemp').textContent = `Current: ${temp} °C`;
+      }
+    });
+
+    // Update chart and list with last 20 readings
+    const historyRef = query(ref(db, '/sensors/device1/history'), limitToLast(20));
+    onValue(historyRef, (snapshot) => {
+      const vals = [];
+      const readingsUl = document.getElementById('readings');
+      readingsUl.innerHTML = '';
+      if (snapshot.exists()) {
+        snapshot.forEach(childSnap => {
+          const temp = childSnap.val();
+          vals.push(temp);
+          const li = document.createElement('li');
+          li.textContent = `${temp} °C`;
+          readingsUl.appendChild(li);
+        });
+        // Update chart data
+        chartLabels.length = 0;
+        chartData.length = 0;
+        vals.forEach((val, idx) => {
+          chartLabels.push(idx + 1);
+          chartData.push(val);
+        });
+        chart.update();
+      }
     });
   </script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </body>
 </html>
