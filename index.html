@@ -1,59 +1,535 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Live Patient Reading</title>
-  <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-app.js";
-    import { getDatabase, ref, query, limitToLast, onChildAdded } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-database.js";
-
-    const firebaseConfig = {
-      apiKey: "...",
-      authDomain: "...",
-      databaseURL: "...",
-      projectId: "...",
-      storageBucket: "...",
-      messagingSenderId: "...",
-      appId: "...",
-      measurementId: "..."
-    };
-    const app = initializeApp(firebaseConfig);
-    const db = getDatabase(app);
-
-    // Change this path to match your structure
-    const readingsRef = ref(db, "readings");
-    const latestQuery = query(readingsRef, limitToLast(1));
-
-    onChildAdded(latestQuery, (snapshot) => {
-      const data = snapshot.val();
-      document.getElementById('live-temp').textContent = data.temp + " °C";
-      document.getElementById('live-bpm').textContent = data.bpm;
-      document.getElementById('live-co2').textContent = data.sco2 + " %";
-      document.getElementById('status').textContent = "Live data from Firebase";
-    });
-  </script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Live Health Monitor</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-database-compat.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700&display=swap" rel="stylesheet">
   <style>
-    body { font-family: Arial, sans-serif; background: #f9fbfd; margin:0; }
-    .container { max-width: 400px; margin: 3em auto; background: #fff; border-radius: 14px; box-shadow: 0 2px 12px #b2e1fa; padding: 2em 1.5em; text-align: center; }
-    .label { font-size: 1.1em; color: #3592bb; margin-top: 1em; }
-    .value { font-size: 2.2em; font-weight: bold; color: #fbbc05; }
-    .icon  { font-size: 2em; color: #45b1e7; }
-    .status { margin-top:1em; font-size: 1em; color: #888;}
+    :root {
+      --primary: #45b1e7;
+      --primary-dark: #3592bb;
+      --bg: #f9fbfd;
+      --card-bg: #fff;
+      --accent: #fbbc05;
+      --alert: #f44336;
+      --border-radius: 16px;
+      --shadow: 0 6px 24px rgba(69, 177, 231, 0.08), 0 1.5px 4px rgba(0,0,0,0.03);
+      --text-main: #222;
+      --text-light: #586377;
+    }
+    html, body { height: 100%; margin: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Montserrat', Arial, sans-serif;
+      background: linear-gradient(120deg, #f9fbfd 70%, #e6f2fb 100%);
+      min-height: 100vh;
+      color: var(--text-main);
+      padding: 0;
+    }
+    header {
+      background: linear-gradient(90deg, var(--primary) 60%, var(--primary-dark) 100%);
+      color: white;
+      padding: 32px 0 24px 0;
+      border-radius: 0 0 var(--border-radius) var(--border-radius);
+      box-shadow: var(--shadow);
+      text-align: center;
+    }
+    header h1 {
+      margin: 0 0 8px 0;
+      font-weight: 700;
+      font-size: 2.2rem;
+      letter-spacing: 1px;
+    }
+    header p {
+      margin: 0;
+      font-size: 1.1rem;
+      font-weight: 400;
+      color: #e1f4fc;
+    }
+    .dashboard {
+      max-width: 1100px;
+      margin: -48px auto 0 auto;
+      padding: 0 20px 40px 20px;
+    }
+    .live-section {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 28px;
+      justify-content: center;
+      margin-bottom: 44px;
+      margin-top: 32px;
+    }
+    .live-card {
+      background: var(--card-bg);
+      border-radius: var(--border-radius);
+      box-shadow: var(--shadow);
+      padding: 32px 40px;
+      min-width: 220px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      position: relative;
+      transition: box-shadow 0.3s;
+    }
+    .live-icon {
+      font-size: 2.6rem;
+      margin-bottom: 8px;
+      color: var(--primary);
+      filter: drop-shadow(0 1px 1px #b2e1fa);
+    }
+    .live-value {
+      font-size: 2.7rem;
+      font-weight: 700;
+      margin-bottom: 0px;
+      color: var(--accent);
+      letter-spacing: 2px;
+    }
+    .live-label {
+      font-size: 1rem;
+      color: var(--text-light);
+      font-weight: 400;
+      letter-spacing: 1px;
+    }
+    .filter-bar {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 18px;
+      margin-bottom: 32px;
+      flex-wrap: wrap;
+    }
+    .filter-bar label {
+      font-size: 1.1rem;
+      color: var(--primary-dark);
+      font-weight: 600;
+    }
+    .filter-bar select, .filter-bar input[type="month"] {
+      font-size: 1.1rem;
+      padding: 7px 16px;
+      border-radius: 8px;
+      border: 1px solid #c7e3f6;
+      background: #eaf7ff;
+      color: var(--primary-dark);
+      outline: none;
+      transition: border 0.2s;
+      font-family: inherit;
+    }
+    .filter-bar select:focus, .filter-bar input[type="month"]:focus {
+      border: 1.5px solid var(--primary);
+    }
+    .chart-section {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 28px;
+      max-width: 900px;
+      margin: 0 auto;
+    }
+    @media (min-width: 900px) {
+      .chart-section {
+        grid-template-columns: 1fr 1fr 1fr;
+      }
+    }
+    .chart-card {
+      background: var(--card-bg);
+      border-radius: var(--border-radius);
+      box-shadow: var(--shadow);
+      padding: 28px 18px 22px 18px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 320px;
+      position: relative;
+    }
+    .chart-card h3 {
+      margin: 0 0 14px 0;
+      color: var(--primary-dark);
+      font-size: 1.2rem;
+      letter-spacing: 1px;
+      font-weight: 600;
+    }
+    .chart-card canvas {
+      width: 100% !important;
+      max-width: 340px;
+      max-height: 180px;
+    }
+    .sos-alert {
+      position: fixed;
+      top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(244,67,54,0.94);
+      color: white; display: flex; align-items: center; justify-content: center;
+      font-size: 2.6rem; font-weight: bold; z-index: 9999;
+      animation: flash 1s infinite;
+      letter-spacing: 2px;
+      text-shadow: 0 2px 8px #c62828, 0 1px 0 #fff;
+      flex-direction: column;
+    }
+    .sos-alert small {
+      font-size: 1.1rem;
+      font-weight: 400;
+      color: #ffe3e3;
+      margin-top: 14px;
+    }
+    .sos-ack-btn {
+      margin-top: 2rem;
+      padding: 0.8rem 2.5rem;
+      font-size: 1.3rem;
+      background: #fff;
+      color: #d32f2f;
+      border: none;
+      border-radius: 10px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      cursor: pointer;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+      transition: background 0.2s, color 0.2s;
+    }
+    .sos-ack-btn:hover {
+      background: #f6c3c3;
+      color: #b71c1c;
+    }
+    @keyframes flash {
+      0% { opacity: 1; }
+      50% { opacity: 0.6; }
+      100% { opacity: 1; }
+    }
+    .footer {
+      text-align: center;
+      padding: 28px 0 10px 0;
+      color: #9db5c8;
+      font-size: 1rem;
+      background: none;
+      letter-spacing: 1px;
+      margin-top: 36px;
+    }
+    .footer a { color: var(--primary-dark); text-decoration: none; font-weight: bold; }
+    ::selection { background: #b6e6ff; }
   </style>
 </head>
 <body>
-  <div class="container">
-    <h2>Live Patient Reading</h2>
-    <div class="label">Temperature</div>
-    <div class="value" id="live-temp">--</div>
-    <div class="icon">🌡️ °C</div>
-    <div class="label">Heart Rate</div>
-    <div class="value" id="live-bpm">--</div>
-    <div class="icon">❤️ BPM</div>
-    <div class="label">sCO₂</div>
-    <div class="value" id="live-co2">--</div>
-    <div class="icon">🫁 %</div>
-    <div class="status" id="status">Waiting for data...</div>
+  <header>
+    <h1>Live Health Monitor</h1>
+    <p>Track your vital signs in real time. Stay informed, stay safe.</p>
+  </header>
+  <div id="sosBanner" class="sos-alert" style="display:none;">
+    🚨 SOS TRIGGERED! 🚨
+    <small>Immediate attention required.</small>
+    <button class="sos-ack-btn" onclick="ackSos()">Respond</button>
   </div>
+  <main class="dashboard">
+    <section class="live-section">
+      <div class="live-card" style="--color: #fbbc05;">
+        <span class="live-icon">🌡️</span>
+        <span id="live-temp" class="live-value">-- °C</span>
+        <span class="live-label">Temperature</span>
+      </div>
+      <div class="live-card" style="--color: #45b1e7;">
+        <span class="live-icon">❤️</span>
+        <span id="live-bpm" class="live-value">--</span>
+        <span class="live-label">Heart Rate (BPM)</span>
+      </div>
+      <div class="live-card" style="--color: #4caf50;">
+        <span class="live-icon">🫁</span>
+        <span id="live-co2" class="live-value">-- %</span>
+        <span class="live-label">sCO₂ (%)</span>
+      </div>
+    </section>
+    <section class="filter-bar">
+      <label for="viewRange">View:</label>
+      <select id="viewRange">
+        <option value="1min">Live (1 Minute)</option>
+        <option value="day">Today</option>
+        <option value="week">Week</option>
+        <option value="month">Month</option>
+      </select>
+      <input type="month" id="monthPicker" style="display: none;">
+    </section>
+    <section class="chart-section">
+      <div class="chart-card">
+        <h3>Temperature (°C)</h3>
+        <canvas id="chartTemp"></canvas>
+      </div>
+      <div class="chart-card">
+        <h3>Heart Rate (BPM)</h3>
+        <canvas id="chartBPM"></canvas>
+      </div>
+      <div class="chart-card">
+        <h3>sCO₂ (%)</h3>
+        <canvas id="chartCO2"></canvas>
+      </div>
+    </section>
+  </main>
+  <footer class="footer">
+    Inspired by leading health apps. &copy; 2025 <a href="#">HealthMonitor</a>
+  </footer>
+  <script>
+    // Firebase config
+    const firebaseConfig = {
+      apiKey: "AIzaSyDssbC1dIiDmACxzSs9Kn-vA-cRT3MLKzk",
+      authDomain: "healthmonitorapp-47655.firebaseapp.com",
+      databaseURL: "https://healthmonitorapp-47655-default-rtdb.firebaseio.com",
+      projectId: "healthmonitorapp-47655",
+      storageBucket: "healthmonitorapp-47655.appspot.com",
+      messagingSenderId: "831668449943",
+      appId: "1:831668449943:web:b9ae8fdd50de8fc4d2efd2",
+      measurementId: "G-BPCV50PSCF"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+
+    function getBarColors(baseColor, highlightColor, len) {
+      return Array.from({length: len-1}, () => baseColor).concat([highlightColor]);
+    }
+
+    const charts = {
+      temp: new Chart(document.getElementById('chartTemp'), {
+        type: 'bar',
+        data: { labels: [], datasets: [{ label: 'Temperature (°C)', data: [], backgroundColor: [] }] },
+        options: {
+          responsive: true,
+          animation: { duration: 700 },
+          plugins: {
+            legend: { display: false },
+            title: { display: false }
+          },
+          scales: {
+            x: {
+              grid: { color: "#f0f6fa" },
+              ticks: { color: "#8aa6be", font: { size: 13, weight: 600 } }
+            },
+            y: {
+              beginAtZero: true,
+              suggestedMin: 20,
+              suggestedMax: 45,
+              grid: { color: "#f0f6fa" },
+              ticks: { color: "#8aa6be", font: { size: 13, weight: 600 } }
+            }
+          }
+        }
+      }),
+      bpm: new Chart(document.getElementById('chartBPM'), {
+        type: 'bar',
+        data: { labels: [], datasets: [{ label: 'Heart Rate (BPM)', data: [], backgroundColor: [] }] },
+        options: {
+          responsive: true,
+          animation: { duration: 700 },
+          plugins: {
+            legend: { display: false },
+            title: { display: false }
+          },
+          scales: {
+            x: {
+              grid: { color: "#f0f6fa" },
+              ticks: { color: "#8aa6be", font: { size: 13, weight: 600 } }
+            },
+            y: {
+              beginAtZero: true,
+              suggestedMin: 50,
+              suggestedMax: 150,
+              grid: { color: "#f0f6fa" },
+              ticks: { color: "#8aa6be", font: { size: 13, weight: 600 } }
+            }
+          }
+        }
+      }),
+      co2: new Chart(document.getElementById('chartCO2'), {
+        type: 'bar',
+        data: { labels: [], datasets: [{ label: 'sCO₂ (%)', data: [], backgroundColor: [] }] },
+        options: {
+          responsive: true,
+          animation: { duration: 700 },
+          plugins: {
+            legend: { display: false },
+            title: { display: false }
+          },
+          scales: {
+            x: {
+              grid: { color: "#f0f6fa" },
+              ticks: { color: "#8aa6be", font: { size: 13, weight: 600 } }
+            },
+            y: {
+              beginAtZero: true,
+              suggestedMin: 60,
+              suggestedMax: 100,
+              grid: { color: "#f0f6fa" },
+              ticks: { color: "#8aa6be", font: { size: 13, weight: 600 } }
+            }
+          }
+        }
+      })
+    };
+
+    let sosKey = null;
+
+    const viewSelect = document.getElementById('viewRange');
+    const monthPicker = document.getElementById('monthPicker');
+
+    viewSelect.addEventListener('change', () => {
+      monthPicker.style.display = viewSelect.value === 'month' ? 'inline-block' : 'none';
+      loadData();
+    });
+    monthPicker.addEventListener('change', loadData);
+
+    function formatHour(hour) {
+      const h = hour % 12 || 12;
+      const ampm = hour < 12 ? "am" : "pm";
+      return `${h}${ampm}`;
+    }
+
+    function updateChart(chart, labels, values, color, highlight) {
+      chart.data.labels = labels;
+      chart.data.datasets[0].data = values.map(v => v===null?null:parseFloat(v));
+      chart.data.datasets[0].backgroundColor = getBarColors(color, highlight, values.length);
+      chart.update();
+    }
+
+    db.ref('readings').limitToLast(1).on('child_added', snapshot => {
+      const data = snapshot.val();
+      sosKey = snapshot.key;
+      if (!data) return;
+      document.getElementById('live-temp').textContent = (data.temp ? data.temp : "--") + " °C";
+      document.getElementById('live-bpm').textContent = data.bpm ? data.bpm : "--";
+      document.getElementById('live-co2').textContent = (data.sco2 ? data.sco2 : "--") + " %";
+      if (data.sos === true && data.sos_ack !== true) {
+        showSOS();
+      } else {
+        hideSOS();
+      }
+    });
+
+    function showSOS() {
+      document.getElementById('sosBanner').style.display = 'flex';
+      if (!window.sosAudioPlayed) {
+        const audio = new Audio('https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg');
+        audio.play();
+        window.sosAudioPlayed = true;
+      }
+    }
+    function hideSOS() {
+      document.getElementById('sosBanner').style.display = 'none';
+      window.sosAudioPlayed = false;
+    }
+    window.ackSos = async function() {
+      if (sosKey) {
+        await db.ref('readings/' + sosKey).update({ sos_ack: true, sos: false });
+        hideSOS();
+      }
+    };
+
+    async function loadData() {
+      const now = new Date();
+      const view = viewSelect.value;
+      const snap = await db.ref('readings').orderByChild('timestamp').limitToLast(500).get();
+
+      if (!snap.exists()) {
+        updateChart(charts.temp, [], [], "#fbbc05", "#e53935");
+        updateChart(charts.bpm, [], [], "#45b1e7", "#1976d2");
+        updateChart(charts.co2, [], [], "#4caf50", "#009688");
+        return;
+      }
+
+      if (view === '1min') {
+        let nowTs = Date.now();
+        let slots = Array.from({length:12}, (_,i)=>nowTs - (11-i)*5000);
+        let barData = Array.from({length:12}, ()=>[]);
+        snap.forEach(child => {
+          const data = child.val();
+          const ts = typeof data.timestamp === "number" ? data.timestamp : new Date(data.timestamp).getTime();
+          for(let i=0;i<12;i++) {
+            if(ts >= slots[i] && ts < slots[i]+5000) {
+              barData[i].push(data);
+              break;
+            }
+          }
+        });
+        const labels = Array.from({length:12}, (_,i)=>`${(i-11)*5<0?-(i-11)*5:0}s ago`).reverse();
+        const temps = barData.map(arr=>arr.length?((arr.reduce((a,b)=>a+Number(b.temp),0))/arr.length).toFixed(1):null);
+        const bpms  = barData.map(arr=>arr.length?((arr.reduce((a,b)=>a+Number(b.bpm),0))/arr.length).toFixed(1):null);
+        const co2s  = barData.map(arr=>arr.length?((arr.reduce((a,b)=>a+Number(b.sco2),0))/arr.length).toFixed(1):null);
+        updateChart(charts.temp, labels, temps, "#fbbc05", "#e53935");
+        updateChart(charts.bpm, labels, bpms, "#45b1e7", "#1976d2");
+        updateChart(charts.co2, labels, co2s, "#4caf50", "#009688");
+        return;
+      }
+
+      if (view === "day") {
+        let bars = Array.from({length:24}, ()=>[]);
+        snap.forEach(child => {
+          const data = child.val();
+          const ts = new Date(data.timestamp);
+          if (ts.toDateString() !== now.toDateString()) return;
+          bars[ts.getHours()].push(data);
+        });
+        const labels = Array.from({length:24}, (_,i)=>formatHour(i));
+        const temps = bars.map(arr=>arr.length?((arr.reduce((a,b)=>a+Number(b.temp),0))/arr.length).toFixed(1):null);
+        const bpms  = bars.map(arr=>arr.length?((arr.reduce((a,b)=>a+Number(b.bpm),0))/arr.length).toFixed(1):null);
+        const co2s  = bars.map(arr=>arr.length?((arr.reduce((a,b)=>a+Number(b.sco2),0))/arr.length).toFixed(1):null);
+        updateChart(charts.temp, labels, temps, "#fbbc05", "#e53935");
+        updateChart(charts.bpm, labels, bpms, "#45b1e7", "#1976d2");
+        updateChart(charts.co2, labels, co2s, "#4caf50", "#009688");
+        return;
+      }
+
+      if (view==="week") {
+        let weekAgo = new Date(now);
+        weekAgo.setHours(0,0,0,0);
+        weekAgo.setDate(now.getDate()-6);
+        let days = Array.from({length:7}, ()=>[]);
+        snap.forEach(child => {
+          const data = child.val();
+          const ts = new Date(data.timestamp);
+          if (ts >= weekAgo && ts <= now) {
+            let dayIdx = Math.floor((ts-weekAgo)/(24*60*60*1000));
+            days[dayIdx].push(data);
+          }
+        });
+        let dayNames = [];
+        for(let i=0;i<7;i++) {
+          let d = new Date(weekAgo);
+          d.setDate(weekAgo.getDate()+i);
+          dayNames.push(d.toLocaleDateString(undefined, {weekday:"short"}));
+        }
+        const temps = days.map(arr=>arr.length?((arr.reduce((a,b)=>a+Number(b.temp),0))/arr.length).toFixed(1):null);
+        const bpms  = days.map(arr=>arr.length?((arr.reduce((a,b)=>a+Number(b.bpm),0))/arr.length).toFixed(1):null);
+        const co2s  = days.map(arr=>arr.length?((arr.reduce((a,b)=>a+Number(b.sco2),0))/arr.length).toFixed(1):null);
+        updateChart(charts.temp, dayNames, temps, "#fbbc05", "#e53935");
+        updateChart(charts.bpm, dayNames, bpms, "#45b1e7", "#1976d2");
+        updateChart(charts.co2, dayNames, co2s, "#4caf50", "#009688");
+        return;
+      }
+
+      if (view==="month") {
+        if (!monthPicker.value) {
+          updateChart(charts.temp, [], [], "#fbbc05", "#e53935");
+          updateChart(charts.bpm, [], [], "#45b1e7", "#1976d2");
+          updateChart(charts.co2, [], [], "#4caf50", "#009688");
+          return;
+        }
+        const [yyyy,mm]=monthPicker.value.split("-");
+        const selectedMonth = new Date(Number(yyyy), Number(mm)-1, 1);
+        let daysInMonth = new Date(Number(yyyy), Number(mm), 0).getDate();
+        let bars = Array.from({length:daysInMonth}, ()=>[]);
+        snap.forEach(child => {
+          const data = child.val();
+          const ts = new Date(data.timestamp);
+          if (ts.getMonth()!==selectedMonth.getMonth() || ts.getFullYear()!==selectedMonth.getFullYear()) return;
+          bars[ts.getDate()-1].push(data);
+        });
+        const labels = Array.from({length:daysInMonth}, (_,i)=>(i+1).toString());
+        const temps = bars.map(arr=>arr.length?((arr.reduce((a,b)=>a+Number(b.temp),0))/arr.length).toFixed(1):null);
+        const bpms  = bars.map(arr=>arr.length?((arr.reduce((a,b)=>a+Number(b.bpm),0))/arr.length).toFixed(1):null);
+        const co2s  = bars.map(arr=>arr.length?((arr.reduce((a,b)=>a+Number(b.sco2),0))/arr.length).toFixed(1):null);
+        updateChart(charts.temp, labels, temps, "#fbbc05", "#e53935");
+        updateChart(charts.bpm, labels, bpms, "#45b1e7", "#1976d2");
+        updateChart(charts.co2, labels, co2s, "#4caf50", "#009688");
+        return;
+      }
+    }
+
+    setInterval(loadData, 3000);
+    loadData();
+  </script>
 </body>
 </html>
