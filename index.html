@@ -5,33 +5,43 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <style>
     body { font-family: Arial, sans-serif; margin: 30px; background:#f6f9fb;}
-    .current-box { background: #fff; max-width: 700px; margin:1em auto 2em auto; border-radius: 14px; box-shadow: 0 2px 8px #0001; padding: 1.2em 2.5em;}
-    .current-row { display: flex; justify-content: space-between; align-items: center;}
-    .current-label { font-weight: bold; color: #555;}
-    .current-value { font-size: 2em; color: #2196f3;}
+    .live-header {
+      max-width: 700px; margin: 0 auto 2em auto; 
+      display: flex; justify-content: space-between; align-items: center;
+      background: linear-gradient(90deg,#e3f2fd,#fff); border-radius: 14px; box-shadow: 0 2px 8px #0002; padding: 1.2em 2.5em;
+      font-size: 1.1em; font-weight: bold; letter-spacing: 1px;
+    }
+    .live-item {display:flex;align-items:center;gap:6px;}
+    .live-label {color:#1976d2;}
+    .live-value {font-size:2em;color:#2196f3;margin-right:5px;}
+    .live-unit {font-size:1em;color:#999;}
     #chartDiv { max-width: 700px; margin: 0 auto 2em auto; background: #fff; border-radius: 14px; box-shadow: 0 2px 8px #0001; padding: 1.2em 2.5em;}
     #controls { display: flex; gap: 1em; flex-wrap: wrap; align-items:center; margin-bottom: 10px;}
     #readingList { max-width: 700px; margin: 0 auto; background: #fff; border-radius: 14px; box-shadow: 0 2px 8px #0001; padding: 1.2em 2.5em;}
     #readingList h3 {margin-top:0;}
     #readings {height:150px;overflow-y:auto;}
     label {font-weight: 600;}
-    input[type="date"] {padding: 2px 8px;}
     select {padding: 2px 8px;}
   </style>
 </head>
 <body>
   <h1 style="text-align:center;">Health Monitor Dashboard</h1>
-  <div class="current-box">
-    <div class="current-row">
-      <span class="current-label">Temperature:</span>
-      <span id="currentTemp" class="current-value">-- °C</span>
-      <span class="current-label">Humidity:</span>
-      <span id="currentHum" class="current-value">-- %</span>
-      <span class="current-label">Pulse:</span>
-      <span id="currentPulse" class="current-value">--</span>
+  
+  <!-- LIVE HEADER -->
+  <div class="live-header" id="liveHeader">
+    <div class="live-item">
+      <span class="live-label">Temp:</span>
+      <span id="liveTemp" class="live-value">--</span>
+      <span class="live-unit">°C</span>
     </div>
-    <div class="current-row" style="font-size:0.95em; color:#888; margin-top:0.5em;">
-      <span>Last updated: <span id="currentTime">--</span></span>
+    <div class="live-item">
+      <span class="live-label">BPM:</span>
+      <span id="liveBpm" class="live-value">--</span>
+    </div>
+    <div class="live-item">
+      <span class="live-label">SpO₂:</span>
+      <span id="liveSpo2" class="live-value">--</span>
+      <span class="live-unit">%</span>
     </div>
   </div>
 
@@ -40,4 +50,137 @@
       <label for="dataType">Chart:</label>
       <select id="dataType">
         <option value="temp">Temperature (°C)</option>
-        <option
+        <option value="bpm">BPM</option>
+        <option value="spo2">SpO₂ (%)</option>
+      </select>
+    </div>
+    <canvas id="mainChart" width="600" height="250"></canvas>
+  </div>
+
+  <div id="readingList">
+    <h3>Recent Readings:</h3>
+    <ul id="readings"></ul>
+  </div>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-app.js";
+    import { getDatabase, ref, onValue, query, limitToLast } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-database.js";
+    import Chart from "https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js";
+
+    // Your Firebase config
+    const firebaseConfig = {
+      apiKey: "AIzaSyDssbC1dIiDmACxzSs9Kn-vA-cRT3MLKzk",
+      authDomain: "healthmonitorapp-47655.firebaseapp.com",
+      databaseURL: "https://healthmonitorapp-47655-default-rtdb.firebaseio.com",
+      projectId: "healthmonitorapp-47655",
+      storageBucket: "healthmonitorapp-47655.appspot.com",
+      messagingSenderId: "831668449943",
+      appId: "1:831668449943:web:b9ae8fdd50de8fc4d2efd2",
+      measurementId: "G-BPCV50PSCF"
+    };
+
+    // Firebase init
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
+
+    // Chart.js setup
+    let chart;
+    let chartLabels = [];
+    let chartData = [];
+    let currentType = 'temp';
+
+    function formatTime(ts) {
+      if (!ts) return '--';
+      const d = new Date(ts);
+      return d.toLocaleString();
+    }
+
+    function updateChart(history, type) {
+      chartLabels.length = 0;
+      chartData.length = 0;
+      history.forEach(r => {
+        chartLabels.push(r.timestamp ? formatTime(r.timestamp) : "");
+        chartData.push(r[type]);
+      });
+      if (chart) chart.update();
+    }
+
+    function updateLiveHeader(latest) {
+      document.getElementById('liveTemp').textContent = latest.temp !== undefined ? latest.temp : '--';
+      document.getElementById('liveBpm').textContent = latest.bpm !== undefined ? latest.bpm : '--';
+      document.getElementById('liveSpo2').textContent = latest.spo2 !== undefined ? latest.spo2 : '--';
+    }
+
+    // Setup chart after DOM ready
+    window.addEventListener('DOMContentLoaded', () => {
+      const ctx = document.getElementById('mainChart').getContext('2d');
+      chart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: chartLabels,
+          datasets: [{
+            label: 'Temperature (°C)',
+            data: chartData,
+            borderColor: '#2196f3',
+            backgroundColor: 'rgba(33,150,243,0.08)',
+            fill: true,
+            tension: 0.13,
+            pointRadius: 2,
+          }]
+        },
+        options: {
+          animation: false,
+          responsive: true,
+          plugins: { legend: { display: true } },
+          scales: {
+            x: { title: { display: true, text: 'Time' } },
+            y: { title: { display: true, text: 'Value' } }
+          }
+        }
+      });
+    });
+
+    // Listen for history (last 20 readings)
+    const historyRef = query(ref(db, '/sensors/device1/history'), limitToLast(20));
+    let historyArr = [];
+    onValue(historyRef, (snapshot) => {
+      historyArr = [];
+      if (snapshot.exists()) {
+        snapshot.forEach(childSnap => {
+          const val = childSnap.val();
+          historyArr.push(val);
+        });
+        // Sort by timestamp, oldest first
+        historyArr.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+        // Update chart and live header
+        updateChart(historyArr, currentType);
+        if (historyArr.length > 0) {
+          updateLiveHeader(historyArr[historyArr.length - 1]);
+        }
+        // Update reading list
+        const readingsUl = document.getElementById('readings');
+        readingsUl.innerHTML = '';
+        historyArr.slice().reverse().forEach(r => {
+          const li = document.createElement('li');
+          li.textContent = `Temp: ${r.temp ?? '--'} °C, BPM: ${r.bpm ?? '--'}, SpO₂: ${r.spo2 ?? '--'}% @ ${r.timestamp ? formatTime(r.timestamp) : ''}`;
+          readingsUl.appendChild(li);
+        });
+      }
+    });
+
+    // Chart data type selector
+    document.getElementById('dataType').addEventListener('change', function() {
+      currentType = this.value;
+      // Update chart label
+      const typeLabel = {
+        temp: 'Temperature (°C)',
+        bpm: 'BPM',
+        spo2: 'SpO₂ (%)'
+      };
+      chart.data.datasets[0].label = typeLabel[currentType];
+      updateChart(historyArr, currentType);
+    });
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</body>
+</html>
