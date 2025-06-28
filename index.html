@@ -6,6 +6,8 @@
   <title>Live Patient Reading</title>
   <style>
     body { font-family: Arial, sans-serif; background: #f9fbfd; margin:0; }
+    .nav {text-align:center;margin-top:1em;}
+    .nav a { color: #45b1e7; text-decoration: none; margin: 0 0.7em; font-weight: bold;}
     .container {
       max-width: 400px; margin: 3em auto;
       background: #fff; border-radius: 14px; box-shadow: 0 2px 12px #b2e1fa;
@@ -16,10 +18,15 @@
     .icon  { font-size: 2em; color: #45b1e7; }
     .status { margin-top:1em; font-size: 1em; color: #888;}
   </style>
+  <!-- Firebase JS SDK -->
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 </head>
 <body>
+  <div class="nav">
+    <a href="index.html">Live Reading</a> | 
+    <a href="patient-history.html">Patient History</a>
+  </div>
   <div class="container">
     <h2>Live Patient Reading</h2>
     <div class="label">Temperature</div>
@@ -36,7 +43,7 @@
   <script>
     // 1. Your Firebase config
     const firebaseConfig = {
-      // Fill in with your Firebase config
+      // FILL IN YOUR FIREBASE CONFIG HERE
       apiKey: "YOUR_API_KEY",
       authDomain: "YOUR_AUTH_DOMAIN",
       databaseURL: "YOUR_DATABASE_URL",
@@ -50,20 +57,25 @@
 
     firebase.initializeApp(firebaseConfig);
     const db = firebase.database();
-    const readingsPath = "patients/latest"; // Adjust this path as needed
+
+    // Use the correct path where you see your readings in Firebase
+    const readingsPath = "patients/latest"; // or "live_reading", etc.
 
     let lastSentTimestamp = null;
     document.getElementById('status').textContent = "Waiting for data...";
 
     db.ref(readingsPath).on('value', snapshot => {
       const data = snapshot.val();
-      if (!data) return;
+      if (!data) {
+        document.getElementById('status').textContent = "No data yet at: " + readingsPath;
+        return;
+      }
       document.getElementById('live-temp').textContent = data.temp + " °C";
       document.getElementById('live-bpm').textContent = data.bpm;
       document.getElementById('live-co2').textContent = data.sco2 + " %";
       document.getElementById('status').textContent = "Live data from Firebase";
 
-      // Send to Google Sheets only if new
+      // Only store to Google Sheets if it's a new reading (avoid duplicates)
       if (lastSentTimestamp === data.timestamp) return;
       lastSentTimestamp = data.timestamp;
 
@@ -82,6 +94,8 @@
       }).catch(() => {
         document.getElementById('status').textContent = "Error storing to Sheets!";
       });
+    }, error => {
+      document.getElementById('status').textContent = "Firebase error: " + error.message;
     });
   </script>
 </body>
