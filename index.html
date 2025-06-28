@@ -1,63 +1,14 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Health Monitor Dashboard</title>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      padding: 20px;
-      background: #f9f9f9;
-    }
-    h1 {
-      text-align: center;
-    }
-    .filter {
-      text-align: center;
-      margin-bottom: 30px;
-    }
-    .chart-container {
-      max-width: 800px;
-      margin: 0 auto 50px auto;
-      background: #fff;
-      padding: 20px;
-      border-radius: 10px;
-      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-    }
-  </style>
+  <title>ESP Sensor Dashboard</title>
 </head>
 <body>
-  <h1>Health Monitor Dashboard</h1>
-
-  <div class="filter">
-    <label for="timeRange">Select Time Range: </label>
-    <select id="timeRange">
-      <option value="1">Today</option>
-      <option value="7">Last 7 Days</option>
-      <option value="30">Last 30 Days</option>
-    </select>
-  </div>
-
-  <div class="chart-container">
-    <h3>Temperature (°C)</h3>
-    <canvas id="tempChart"></canvas>
-  </div>
-
-  <div class="chart-container">
-    <h3>Heart Rate (BPM)</h3>
-    <canvas id="bpmChart"></canvas>
-  </div>
-
-  <div class="chart-container">
-    <h3>sCO₂ (ppm)</h3>
-    <canvas id="co2Chart"></canvas>
-  </div>
-
+  <h1>ESP Sensor Value:</h1>
+  <div id="sensorValue">Loading...</div>
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-app.js";
-    import { getFirestore, collection, query, orderBy, getDocs, limit } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore.js";
+    import { getDatabase, ref, onValue } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-database.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyBBAvRnaZxvYqy3tj7rJ--EYojSH8wQHMY",
@@ -66,75 +17,19 @@
       storageBucket: "heal-9faa0.firebasestorage.app",
       messagingSenderId: "265082548829",
       appId: "1:265082548829:web:3aededa684fa98a17ed3b4",
-      measurementId: "G-P7TNMCCYJ0"
+      measurementId: "G-P7TNMCCYJ0",
+      databaseURL: "https://heal-9faa0-default-rtdb.firebaseio.com"
     };
 
     const app = initializeApp(firebaseConfig);
-    const db = getFirestore(app);
+    const db = getDatabase(app);
 
-    const tempChart = createChart('tempChart', 'red');
-    const bpmChart = createChart('bpmChart', 'blue');
-    const co2Chart = createChart('co2Chart', 'green');
+    const valueDiv = document.getElementById('sensorValue');
+    const valueRef = ref(db, '/sensors/device1/value');
 
-    document.getElementById('timeRange').addEventListener('change', loadData);
-
-    async function loadData() {
-      const days = parseInt(document.getElementById('timeRange').value);
-      const cutoff = Date.now() - (days * 24 * 60 * 60 * 1000);
-      const snapshot = await getDocs(query(collection(db, 'readings'), orderBy('timestamp')));
-
-      const labels = [];
-      const tempData = [];
-      const bpmData = [];
-      const co2Data = [];
-
-      snapshot.forEach(doc => {
-        const data = doc.data();
-        const ts = parseInt(data.timestamp);
-        if (ts > cutoff) {
-          const timeLabel = new Date(ts).toLocaleString();
-          labels.push(timeLabel);
-          tempData.push(data.temp?.doubleValue || 0);
-          bpmData.push(data.bpm?.integerValue || 0);
-          co2Data.push(data.sco2?.doubleValue || 0);
-        }
-      });
-
-      updateChart(tempChart, labels, tempData);
-      updateChart(bpmChart, labels, bpmData);
-      updateChart(co2Chart, labels, co2Data);
-    }
-
-    function createChart(id, color) {
-      return new Chart(document.getElementById(id), {
-        type: 'line',
-        data: {
-          labels: [],
-          datasets: [{
-            data: [],
-            borderColor: color,
-            fill: false,
-            tension: 0.2
-          }]
-        },
-        options: {
-          responsive: true,
-          scales: {
-            x: { ticks: { autoSkip: true, maxTicksLimit: 10 } },
-            y: { beginAtZero: true }
-          }
-        }
-      });
-    }
-
-    function updateChart(chart, labels, data) {
-      chart.data.labels = labels;
-      chart.data.datasets[0].data = data;
-      chart.update();
-    }
-
-    // Initial load
-    loadData();
+    onValue(valueRef, (snapshot) => {
+      valueDiv.innerText = snapshot.exists() ? snapshot.val() : "No data";
+    });
   </script>
 </body>
 </html>
