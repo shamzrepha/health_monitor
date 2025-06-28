@@ -172,6 +172,24 @@
       color: #ffe3e3;
       margin-top: 14px;
     }
+    .sos-ack-btn {
+      margin-top: 2rem;
+      padding: 0.8rem 2.5rem;
+      font-size: 1.3rem;
+      background: #fff;
+      color: #d32f2f;
+      border: none;
+      border-radius: 10px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      cursor: pointer;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+      transition: background 0.2s, color 0.2s;
+    }
+    .sos-ack-btn:hover {
+      background: #f6c3c3;
+      color: #b71c1c;
+    }
     @keyframes flash {
       0% { opacity: 1; }
       50% { opacity: 0.6; }
@@ -198,6 +216,7 @@
   <div id="sosBanner" class="sos-alert" style="display:none;">
     🚨 SOS TRIGGERED! 🚨
     <small>Immediate attention required.</small>
+    <button class="sos-ack-btn" onclick="ackSos()">Respond</button>
   </div>
   <main class="dashboard">
     <section class="live-section">
@@ -343,6 +362,9 @@
       })
     };
 
+    let sosActive = false;
+    let sosKey = null;
+
     const viewSelect = document.getElementById('viewRange');
     const monthPicker = document.getElementById('monthPicker');
 
@@ -365,25 +387,49 @@
       chart.update();
     }
 
+    // Listen to all readings for latest and SOS
     db.ref('readings').limitToLast(1).on('child_added', snapshot => {
       const data = snapshot.val();
+      sosKey = snapshot.key;
       if (!data) return;
       document.getElementById('live-temp').textContent = (data.temp ? data.temp : "--") + " °C";
       document.getElementById('live-bpm').textContent = data.bpm ? data.bpm : "--";
       document.getElementById('live-co2').textContent = (data.sco2 ? data.sco2 : "--") + " %";
-      if (data.sos === true) {
-        document.getElementById('sosBanner').style.display = 'flex';
-        const audio = new Audio('https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg');
-        audio.play();
+      // SOS Banner
+      if (data.sos === true && data.sos_ack !== true) {
+        showSOS();
       } else {
-        document.getElementById('sosBanner').style.display = 'none';
+        hideSOS();
       }
     });
+
+    function showSOS() {
+      sosActive = true;
+      document.getElementById('sosBanner').style.display = 'flex';
+      // Play sound only if just shown
+      if (!window.sosAudioPlayed) {
+        const audio = new Audio('https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg');
+        audio.play();
+        window.sosAudioPlayed = true;
+      }
+    }
+    function hideSOS() {
+      sosActive = false;
+      document.getElementById('sosBanner').style.display = 'none';
+      window.sosAudioPlayed = false;
+    }
+    // Acknowledge SOS
+    window.ackSos = async function() {
+      if (sosKey) {
+        await db.ref('readings/' + sosKey).update({ sos_ack: true, sos: false });
+        hideSOS();
+      }
+    };
 
     async function loadData() {
       const now = new Date();
       const view = viewSelect.value;
-      const snap = await db.ref('readings').orderByChild('timestamp').limitToLast(400).get();
+      const snap = await db.ref('readings').orderByChild('timestamp').limitToLast(500).get();
 
       if (view === '1min') {
         let nowTs = Date.now();
