@@ -490,9 +490,9 @@
         const bpm = [];
         const sco2 = [];
         items.forEach(d => {
-          let label = d.timestamp
-            ? new Date(Number(d.timestamp)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-            : (d.time || "–");
+          let label = d.iso_time
+            ? d.iso_time.split("T")[1].slice(0,8) // HH:MM:SS
+            : (d.timestamp ? new Date(Number(d.timestamp)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : "–");
           labels.push(label);
           temp.push(Number(d.temp) || null);
           bpm.push(Number(d.bpm) || null);
@@ -592,8 +592,14 @@
       const hourly = Array.from({length: 24}, () => []);
       readings.forEach(r => {
         if (!r.timestamp) return;
-        const date = new Date(Number(r.timestamp));
-        const hour = date.getHours();
+        // Nigerian time, so parse iso_time if available
+        let hour = null;
+        if (r.iso_time) {
+          hour = Number(r.iso_time.substr(11,2));
+        } else {
+          const date = new Date(Number(r.timestamp));
+          hour = date.getHours();
+        }
         hourly[hour].push(r);
       });
       const tempAvg = [];
@@ -616,11 +622,12 @@
       return {hourLabels, tempAvg, bpmAvg, sco2Avg};
     }
 
-    // Fetch all readings for a selected date (UTC)
+    // Fetch all readings for a selected date (Nigerian time)
     function fetchHistoryForDate(dateStr) {
       if (!dateStr) return;
-      const start = new Date(dateStr + "T00:00:00Z").getTime();
-      const end = new Date(dateStr + "T23:59:59.999Z").getTime();
+      // Calculate Nigerian day range in UTC ms
+      const start = new Date(dateStr + "T00:00:00+01:00").getTime();
+      const end = new Date(dateStr + "T23:59:59.999+01:00").getTime();
       db.ref('readings').orderByChild('timestamp').startAt(start).endAt(end).once('value', snap => {
         const readings = [];
         snap.forEach(child => {
@@ -642,7 +649,7 @@
       tbody.innerHTML = "";
       readings.forEach(r => {
         const tr = document.createElement('tr');
-        const ts = r.timestamp ? new Date(Number(r.timestamp)).toLocaleString() : (r.time || "--");
+        const ts = r.iso_time ? r.iso_time.replace("T", " ").replace("+01:00","") : (r.timestamp ? new Date(Number(r.timestamp)).toLocaleString() : "–");
         tr.innerHTML = `
           <td>${ts}</td>
           <td>${r.temp !== undefined ? r.temp : "--"}</td>
