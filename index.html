@@ -21,7 +21,9 @@
     #readingList h3 {margin-top:0;}
     #readings {height:150px;overflow-y:auto;}
     label {font-weight: 600;}
-    select {padding: 2px 8px;}
+    select, input[type="date"] {padding: 2px 8px;}
+    #toLabel {margin: 0 3px;}
+    #applyRange {padding: 3px 10px;}
   </style>
 </head>
 <body>
@@ -53,6 +55,17 @@
         <option value="bpm">BPM</option>
         <option value="spo2">SpO₂ (%)</option>
       </select>
+      <label for="timeRange">View:</label>
+      <select id="timeRange">
+        <option value="day">Daily</option>
+        <option value="week">Weekly</option>
+        <option value="month">Monthly</option>
+        <option value="custom">Custom</option>
+      </select>
+      <input type="date" id="startDate" style="display:none;">
+      <span id="toLabel" style="display:none;">to</span>
+      <input type="date" id="endDate" style="display:none;">
+      <button id="applyRange" style="display:none;">Apply</button>
     </div>
     <canvas id="mainChart" width="600" height="250"></canvas>
   </div>
@@ -64,7 +77,7 @@
 
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-app.js";
-    import { getDatabase, ref, onValue, query, limitToLast } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-database.js";
+    import { getDatabase, ref, onValue, query, orderByChild, limitToLast } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-database.js";
     import Chart from "https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js";
 
     // Your Firebase config
@@ -88,6 +101,7 @@
     let chartLabels = [];
     let chartData = [];
     let currentType = 'temp';
+    let historyArr = [];
 
     function formatTime(ts) {
       if (!ts) return '--';
@@ -140,9 +154,8 @@
       });
     });
 
-    // Listen for history (last 20 readings)
-    const historyRef = query(ref(db, '/sensors/device1/history'), limitToLast(20));
-    let historyArr = [];
+    // Listen for history (last 200 readings for filtering)
+    const historyRef = query(ref(db, '/sensors/device1/history'), orderByChild('timestamp'), limitToLast(200));
     onValue(historyRef, (snapshot) => {
       historyArr = [];
       if (snapshot.exists()) {
@@ -152,21 +165,26 @@
         });
         // Sort by timestamp, oldest first
         historyArr.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
-        // Update chart and live header
-        updateChart(historyArr, currentType);
+        // Default: show today's data
+        if (!window.__chartFiltered) filterAndPlotByDate(getTodayStart(), getTomorrowStart());
+        // Update live header
         if (historyArr.length > 0) {
           updateLiveHeader(historyArr[historyArr.length - 1]);
         }
         // Update reading list
-        const readingsUl = document.getElementById('readings');
-        readingsUl.innerHTML = '';
-        historyArr.slice().reverse().forEach(r => {
-          const li = document.createElement('li');
-          li.textContent = `Temp: ${r.temp ?? '--'} °C, BPM: ${r.bpm ?? '--'}, SpO₂: ${r.spo2 ?? '--'}% @ ${r.timestamp ? formatTime(r.timestamp) : ''}`;
-          readingsUl.appendChild(li);
-        });
+        updateReadingList(historyArr);
       }
     });
+
+    function updateReadingList(arr) {
+      const readingsUl = document.getElementById('readings');
+      readingsUl.innerHTML = '';
+      arr.slice().reverse().forEach(r => {
+        const li = document.createElement('li');
+        li.textContent = `Temp: ${r.temp ?? '--'} °C, BPM: ${r.bpm ?? '--'}, SpO₂: ${r.spo2 ?? '--'}% @ ${r.timestamp ? formatTime(r.timestamp) : ''}`;
+        readingsUl.appendChild(li);
+      });
+    }
 
     // Chart data type selector
     document.getElementById('dataType').addEventListener('change', function() {
@@ -178,8 +196,88 @@
         spo2: 'SpO₂ (%)'
       };
       chart.data.datasets[0].label = typeLabel[currentType];
-      updateChart(historyArr, currentType);
+      // Re-filter based on current selected range
+      if (window.__chartFiltered) filterAndPlotByDate(window.__chartFiltered[0], window.__chartFiltered[1]);
     });
+
+    // Time range controls
+    function getTodayStart() {
+      const now = new Date();
+      return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    }
+    function getTomorrowStart() {
+      const t = getTodayStart();
+      t.setDate(t.getDate() + 1); return t;
+    }
+    function getWeekStart() {
+      const now = new Date();
+      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      d.setDate(d.getDate() - d.getDay());
+      return d;
+    }
+    function getNextWeekStart() {
+      const d = getWeekStart();
+      d.setDate(d.getDate() + 7); return d;
+    }
+    function getMonthStart() {
+      const now = new Date();
+      return new Date(now.getFullYear(), now.getMonth(), 1);
+    }
+    function getNextMonthStart() {
+      const now = new Date();
+      return new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    }
+
+    // Range UI logic
+    document.getElementById('timeRange').addEventListener('change', function() {
+      const val = this.value;
+      const startDate = document.getElementById('startDate');
+      const endDate = document.getElementById('endDate');
+      const toLabel = document.getElementById('toLabel');
+      const applyBtn = document.getElementById('applyRange');
+      startDate.style.display = 'none';
+      endDate.style.display = 'none';
+      toLabel.style.display = 'none';
+      applyBtn.style.display = 'none';
+      let start, end;
+      if (val === 'custom') {
+        startDate.style.display = '';
+        endDate.style.display = '';
+        toLabel.style.display = '';
+        applyBtn.style.display = '';
+        // Clear previous filter until user applies
+        window.__chartFiltered = null;
+      } else {
+        if (val === 'day') {
+          start = getTodayStart();
+          end = getTomorrowStart();
+        } else if (val === 'week') {
+          start = getWeekStart();
+          end = getNextWeekStart();
+        } else if (val === 'month') {
+          start = getMonthStart();
+          end = getNextMonthStart();
+        }
+        filterAndPlotByDate(start, end);
+      }
+    });
+
+    document.getElementById('applyRange').addEventListener('click', function() {
+      const start = new Date(document.getElementById('startDate').value);
+      const end = new Date(document.getElementById('endDate').value);
+      if (start && end && end > start) {
+        filterAndPlotByDate(start, end);
+      }
+    });
+
+    function filterAndPlotByDate(start, end) {
+      window.__chartFiltered = [start, end];
+      // Filter readings by timestamp
+      const filtered = historyArr.filter(r => r.timestamp &&
+        new Date(r.timestamp) >= start && new Date(r.timestamp) < end
+      );
+      updateChart(filtered, currentType);
+    }
   </script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </body>
