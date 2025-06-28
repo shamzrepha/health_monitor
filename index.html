@@ -195,32 +195,32 @@
 
     let sosKey = null;
     let sosActive = false;
-    let sosAudioInterval = null;
+    let sosAudioShouldLoop = false;
 
-    // Play SOS audio in a loop
-    function playSosAudio() {
+    // Play SOS and keep it looping regardless of new readings, until ack
+    function playPersistentSosAudio() {
       const audio = document.getElementById('sos-audio');
       if (!audio) return;
+      sosAudioShouldLoop = true;
       audio.currentTime = 0;
       audio.play();
-      // Restart audio after it ends to keep ringing
-      sosAudioInterval = setInterval(() => {
-        if (!sosActive) return;
-        audio.currentTime = 0;
-        audio.play();
-      }, 3000); // Alarm is ~2.5s, so this keeps it ringing
+      audio.onended = function() {
+        if (sosAudioShouldLoop) {
+          audio.currentTime = 0;
+          audio.play();
+        }
+      };
     }
-
     function stopSosAudio() {
+      sosAudioShouldLoop = false;
       const audio = document.getElementById('sos-audio');
       if (!audio) return;
       audio.pause();
       audio.currentTime = 0;
-      if (sosAudioInterval) clearInterval(sosAudioInterval);
-      sosAudioInterval = null;
+      audio.onended = null;
     }
 
-    // Live value update and SOS
+    // Live value update and persistent SOS behavior
     db.ref('readings').limitToLast(1).on('value', snap => {
       if (!snap.exists()) return;
       let lastData, lastKey;
@@ -230,24 +230,24 @@
       document.getElementById('live-bpm').textContent = lastData.bpm ? lastData.bpm : "--";
       document.getElementById('live-co2').textContent = (lastData.sco2 ? lastData.sco2 : "--") + " %";
       sosKey = lastKey;
+
+      // SOS logic: Once triggered, keep showing and ringing until ack, regardless of new readings!
       if (lastData.sos === true && lastData.sos_ack !== true) {
-        showSOS();
-      } else {
-        hideSOS();
+        if (!sosActive) {
+          sosActive = true;
+          showSOS();
+        }
       }
     });
 
     function showSOS() {
       document.getElementById('sosBanner').style.display = 'flex';
-      if (!sosActive) {
-        sosActive = true;
-        playSosAudio();
-      }
+      playPersistentSosAudio();
     }
     function hideSOS() {
       document.getElementById('sosBanner').style.display = 'none';
-      sosActive = false;
       stopSosAudio();
+      sosActive = false;
     }
     window.ackSos = async function() {
       if (sosKey) {
@@ -255,6 +255,9 @@
         hideSOS();
       }
     };
+
+    // Ensure that the popup never disappears once triggered, until user responds
+    // (This is enforced by not hiding it until ackSos is called)
   </script>
 </body>
 </html>
