@@ -3,22 +3,14 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Health Monitor Dashboard</title>
+  <title>Health Monitor Realtime</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-database-compat.js"></script>
   <style>
-    body {
-      font-family: Arial, sans-serif;
-      padding: 20px;
-      background: #f0f4f8;
-    }
-    h1 {
-      text-align: center;
-      margin-bottom: 20px;
-    }
-    .filter {
-      text-align: center;
-      margin-bottom: 30px;
-    }
+    body { font-family: Arial, sans-serif; background: #f0f4f8; padding: 20px; }
+    h1 { text-align: center; }
+    .filter { text-align: center; margin-bottom: 30px; }
     .chart-container {
       max-width: 800px;
       margin: 0 auto 50px auto;
@@ -30,10 +22,9 @@
   </style>
 </head>
 <body>
-  <h1>Health Monitor Dashboard</h1>
-
+  <h1>Realtime Health Monitor Dashboard</h1>
   <div class="filter">
-    <label for="timeRange">Select Time Range: </label>
+    <label for="timeRange">Time Range: </label>
     <select id="timeRange">
       <option value="1">Today</option>
       <option value="7">Last 7 Days</option>
@@ -56,22 +47,20 @@
     <canvas id="co2Chart"></canvas>
   </div>
 
-  <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-app.js";
-    import { getFirestore, collection, query, orderBy, getDocs } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore.js";
-
+  <script>
     const firebaseConfig = {
-      apiKey: "AIzaSyBBAvRnaZxvYqy3tj7rJ--EYojSH8wQHMY",
-      authDomain: "heal-9faa0.firebaseapp.com",
-      projectId: "heal-9faa0",
-      storageBucket: "heal-9faa0.firebasestorage.app",
-      messagingSenderId: "265082548829",
-      appId: "1:265082548829:web:3aededa684fa98a17ed3b4",
-      measurementId: "G-P7TNMCCYJ0"
+      apiKey: "AIzaSyDssbC1dIiDmACxzSs9Kn-vA-cRT3MLKzk",
+      authDomain: "healthmonitorapp-47655.firebaseapp.com",
+      databaseURL: "https://healthmonitorapp-47655-default-rtdb.firebaseio.com",
+      projectId: "healthmonitorapp-47655",
+      storageBucket: "healthmonitorapp-47655.firebasestorage.app",
+      messagingSenderId: "831668449943",
+      appId: "1:831668449943:web:b9ae8fdd50de8fc4d2efd2",
+      measurementId: "G-BPCV50PSCF"
     };
 
-    const app = initializeApp(firebaseConfig);
-    const db = getFirestore(app);
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
 
     const tempChart = createChart('tempChart', 'red');
     const bpmChart = createChart('bpmChart', 'blue');
@@ -82,23 +71,20 @@
     async function loadData() {
       const days = parseInt(document.getElementById('timeRange').value);
       const cutoff = Date.now() - (days * 24 * 60 * 60 * 1000);
-      const snapshot = await getDocs(query(collection(db, 'readings'), orderBy('timestamp')));
+      const snapshot = await db.ref('readings').orderByChild('timestamp').startAt(cutoff).get();
 
       const labels = [];
       const tempData = [];
       const bpmData = [];
       const co2Data = [];
 
-      snapshot.forEach(doc => {
-        const data = doc.data();
-        const ts = parseInt(data.timestamp);
-        if (ts > cutoff) {
-          const timeLabel = new Date(ts).toLocaleString();
-          labels.push(timeLabel);
-          tempData.push(data.temp?.doubleValue || 0);
-          bpmData.push(data.bpm?.integerValue || 0);
-          co2Data.push(data.sco2?.doubleValue || 0);
-        }
+      snapshot.forEach(child => {
+        const data = child.val();
+        const timeLabel = new Date(data.timestamp).toLocaleString();
+        labels.push(timeLabel);
+        tempData.push(data.temp || 0);
+        bpmData.push(data.bpm || 0);
+        co2Data.push(data.sco2 || 0);
       });
 
       updateChart(tempChart, labels, tempData);
@@ -109,22 +95,8 @@
     function createChart(id, color) {
       return new Chart(document.getElementById(id), {
         type: 'line',
-        data: {
-          labels: [],
-          datasets: [{
-            data: [],
-            borderColor: color,
-            fill: false,
-            tension: 0.2
-          }]
-        },
-        options: {
-          responsive: true,
-          scales: {
-            x: { ticks: { autoSkip: true, maxTicksLimit: 10 } },
-            y: { beginAtZero: true }
-          }
-        }
+        data: { labels: [], datasets: [{ data: [], borderColor: color, fill: false, tension: 0.2 }] },
+        options: { responsive: true, scales: { x: { ticks: { autoSkip: true, maxTicksLimit: 10 } }, y: { beginAtZero: true } } }
       });
     }
 
