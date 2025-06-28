@@ -13,7 +13,7 @@
       --primary: #45b1e7;
       --primary-dark: #3592bb;
       --bg: #f9fbfd;
-      --card-bg: #fff;
+      --card-bg: #fff;sso
       --accent: #fbbc05;
       --alert: #f44336;
       --border-radius: 16px;
@@ -106,7 +106,7 @@
       color: var(--primary-dark);
       font-weight: 600;
     }
-    .filter-bar select, .filter-bar input[type="month"] {
+    .filter-bar select, .filter-bar input[type="month"], .filter-bar input[type="date"] {
       font-size: 1.1rem;
       padding: 7px 16px;
       border-radius: 8px;
@@ -117,7 +117,7 @@
       transition: border 0.2s;
       font-family: inherit;
     }
-    .filter-bar select:focus, .filter-bar input[type="month"]:focus {
+    .filter-bar select:focus, .filter-bar input[type="month"]:focus, .filter-bar input[type="date"]:focus {
       border: 1.5px solid var(--primary);
     }
     .chart-section {
@@ -206,6 +206,38 @@
     }
     .footer a { color: var(--primary-dark); text-decoration: none; font-weight: bold; }
     ::selection { background: #b6e6ff; }
+    .history-table-section {
+      max-width: 900px;
+      margin: 24px auto 0 auto;
+      background: var(--card-bg);
+      border-radius: var(--border-radius);
+      box-shadow: var(--shadow);
+      padding: 14px 8px;
+      overflow-x: auto;
+    }
+    .history-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 1rem;
+      color: #333;
+      margin: 0 auto;
+    }
+    .history-table th, .history-table td {
+      padding: 7px 13px;
+      border-bottom: 1px solid #eaf7ff;
+    }
+    .history-table th {
+      background: #eaf7ff;
+      color: var(--primary-dark);
+      font-weight: 600;
+      text-align: left;
+    }
+    .history-table tr:last-child td {
+      border-bottom: none;
+    }
+    .history-table tr:hover {
+      background: #f6fbff;
+    }
   </style>
 </head>
 <body>
@@ -245,6 +277,8 @@
         <option value="month">Month</option>
       </select>
       <input type="month" id="monthPicker" style="display: none;">
+      <label for="historyDate" style="margin-left:12px;">Patient History:</label>
+      <input type="date" id="historyDate" max="9999-12-31">
     </section>
     <section class="chart-section">
       <div class="chart-card">
@@ -259,6 +293,21 @@
         <h3>sCO₂ (%)</h3>
         <canvas id="chartCO2"></canvas>
       </div>
+    </section>
+    <section class="history-table-section" id="historyTableSection" style="display:none;">
+      <table class="history-table" id="historyTable">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Temperature (°C)</th>
+            <th>Heart Rate (BPM)</th>
+            <th>sCO₂ (%)</th>
+            <th>SOS</th>
+          </tr>
+        </thead>
+        <tbody id="historyTableBody">
+        </tbody>
+      </table>
     </section>
   </main>
   <footer class="footer">
@@ -280,6 +329,7 @@
     const db = firebase.database();
 
     function getBarColors(baseColor, highlightColor, len) {
+      if (len === 0) return [];
       return Array.from({length: len-1}, () => baseColor).concat([highlightColor]);
     }
 
@@ -365,12 +415,24 @@
 
     const viewSelect = document.getElementById('viewRange');
     const monthPicker = document.getElementById('monthPicker');
+    const historyDate = document.getElementById('historyDate');
+    const historyTableSection = document.getElementById('historyTableSection');
+    const historyTableBody = document.getElementById('historyTableBody');
 
     viewSelect.addEventListener('change', () => {
       monthPicker.style.display = viewSelect.value === 'month' ? 'inline-block' : 'none';
+      // if switching away from history, clear date
+      if (historyDate.value) {
+        historyDate.value = "";
+        historyTableSection.style.display = "none";
+      }
       loadData();
     });
     monthPicker.addEventListener('change', loadData);
+    historyDate.addEventListener('change', () => {
+      // Hide the summary views if a date is picked
+      loadData();
+    });
 
     function formatHour(hour) {
       const h = hour % 12 || 12;
@@ -380,11 +442,30 @@
 
     function updateChart(chart, labels, values, color, highlight) {
       chart.data.labels = labels;
-      chart.data.datasets[0].data = values.map(v => v===null?null:parseFloat(v));
+      // Fill in 0 for missing/null so bars always appear
+      chart.data.datasets[0].data = values.map(v => (v === null || v === undefined) ? 0 : parseFloat(v));
       chart.data.datasets[0].backgroundColor = getBarColors(color, highlight, values.length);
       chart.update();
     }
 
+    function populateHistoryTable(readings) {
+      historyTableBody.innerHTML = "";
+      readings.forEach(data => {
+        const t = new Date(data.timestamp);
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${t.toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", second: "2-digit"})}</td>
+          <td>${data.temp !== undefined ? data.temp : ''}</td>
+          <td>${data.bpm !== undefined ? data.bpm : ''}</td>
+          <td>${data.sco2 !== undefined ? data.sco2 : ''}</td>
+          <td>${data.sos === true ? '🚨' : ''}</td>
+        `;
+        historyTableBody.appendChild(tr);
+      });
+      historyTableSection.style.display = readings.length ? "block" : "none";
+    }
+
+    // Real-time update for live cards and SOS
     db.ref('readings').limitToLast(1).on('child_added', snapshot => {
       const data = snapshot.val();
       sosKey = snapshot.key;
@@ -421,6 +502,71 @@
     async function loadData() {
       const now = new Date();
       const view = viewSelect.value;
+      const history = historyDate.value;
+
+      // --- PATIENT HISTORY MODE ---
+      if (history) {
+        // Hide month picker, as patient history is active
+        monthPicker.style.display = "none";
+        // Date range for that day
+        const [yyyy, mm, dd] = history.split('-').map(Number);
+        const start = new Date(yyyy, mm-1, dd, 0, 0, 0).getTime();
+        const end = new Date(yyyy, mm-1, dd, 23, 59, 59, 999).getTime();
+
+        // Fetch all readings for the selected date
+        const snap = await db.ref('readings')
+          .orderByChild('timestamp')
+          .startAt(start)
+          .endAt(end)
+          .get();
+
+        let readings = [];
+        if (snap.exists()) {
+          snap.forEach(child => {
+            readings.push(child.val());
+          });
+        }
+
+        // Sort by timestamp just in case
+        readings.sort((a, b) => a.timestamp - b.timestamp);
+
+        // Chart: show as line chart for history (convert chart type if needed)
+        ["temp", "bpm", "co2"].forEach((key, idx) => {
+          const chart = charts[key];
+          // Switch to line chart if not already
+          if (chart.config.type !== 'line') {
+            chart.config.type = 'line';
+            chart.options.scales.x.type = "category";
+          }
+        });
+
+        const labels = readings.map(d => {
+          const t = new Date(d.timestamp);
+          return t.toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", second: "2-digit"});
+        });
+        const temps = readings.map(d => d.temp !== undefined ? parseFloat(d.temp) : null);
+        const bpms = readings.map(d => d.bpm !== undefined ? parseFloat(d.bpm) : null);
+        const co2s = readings.map(d => d.sco2 !== undefined ? parseFloat(d.sco2) : null);
+
+        updateChart(charts.temp, labels, temps, "#fbbc05", "#e53935");
+        updateChart(charts.bpm, labels, bpms, "#45b1e7", "#1976d2");
+        updateChart(charts.co2, labels, co2s, "#4caf50", "#009688");
+
+        // Show readings in table
+        populateHistoryTable(readings);
+        return;
+      } else {
+        // If not in history mode, always use bar chart
+        ["temp", "bpm", "co2"].forEach(key => {
+          const chart = charts[key];
+          if (chart.config.type !== 'bar') {
+            chart.config.type = 'bar';
+          }
+        });
+        historyTableSection.style.display = "none";
+      }
+
+      // --- LIVE/DAY/WEEK/MONTH MODES ---
       const snap = await db.ref('readings').orderByChild('timestamp').limitToLast(500).get();
 
       if (!snap.exists()) {
@@ -445,9 +591,9 @@
           }
         });
         const labels = Array.from({length:12}, (_,i)=>`${(i-11)*5<0?-(i-11)*5:0}s ago`).reverse();
-        const temps = barData.map(arr=>arr.length?((arr.reduce((a,b)=>a+Number(b.temp),0))/arr.length).toFixed(1):null);
-        const bpms  = barData.map(arr=>arr.length?((arr.reduce((a,b)=>a+Number(b.bpm),0))/arr.length).toFixed(1):null);
-        const co2s  = barData.map(arr=>arr.length?((arr.reduce((a,b)=>a+Number(b.sco2),0))/arr.length).toFixed(1):null);
+        const temps = barData.map(arr=>arr.length?((arr.reduce((a,b)=>a+Number(b.temp),0))/arr.length).toFixed(1):0);
+        const bpms  = barData.map(arr=>arr.length?((arr.reduce((a,b)=>a+Number(b.bpm),0))/arr.length).toFixed(1):0);
+        const co2s  = barData.map(arr=>arr.length?((arr.reduce((a,b)=>a+Number(b.sco2),0))/arr.length).toFixed(1):0);
         updateChart(charts.temp, labels, temps, "#fbbc05", "#e53935");
         updateChart(charts.bpm, labels, bpms, "#45b1e7", "#1976d2");
         updateChart(charts.co2, labels, co2s, "#4caf50", "#009688");
@@ -463,9 +609,9 @@
           bars[ts.getHours()].push(data);
         });
         const labels = Array.from({length:24}, (_,i)=>formatHour(i));
-        const temps = bars.map(arr=>arr.length?((arr.reduce((a,b)=>a+Number(b.temp),0))/arr.length).toFixed(1):null);
-        const bpms  = bars.map(arr=>arr.length?((arr.reduce((a,b)=>a+Number(b.bpm),0))/arr.length).toFixed(1):null);
-        const co2s  = bars.map(arr=>arr.length?((arr.reduce((a,b)=>a+Number(b.sco2),0))/arr.length).toFixed(1):null);
+        const temps = bars.map(arr=>arr.length?((arr.reduce((a,b)=>a+Number(b.temp),0))/arr.length).toFixed(1):0);
+        const bpms  = bars.map(arr=>arr.length?((arr.reduce((a,b)=>a+Number(b.bpm),0))/arr.length).toFixed(1):0);
+        const co2s  = bars.map(arr=>arr.length?((arr.reduce((a,b)=>a+Number(b.sco2),0))/arr.length).toFixed(1):0);
         updateChart(charts.temp, labels, temps, "#fbbc05", "#e53935");
         updateChart(charts.bpm, labels, bpms, "#45b1e7", "#1976d2");
         updateChart(charts.co2, labels, co2s, "#4caf50", "#009688");
@@ -491,9 +637,9 @@
           d.setDate(weekAgo.getDate()+i);
           dayNames.push(d.toLocaleDateString(undefined, {weekday:"short"}));
         }
-        const temps = days.map(arr=>arr.length?((arr.reduce((a,b)=>a+Number(b.temp),0))/arr.length).toFixed(1):null);
-        const bpms  = days.map(arr=>arr.length?((arr.reduce((a,b)=>a+Number(b.bpm),0))/arr.length).toFixed(1):null);
-        const co2s  = days.map(arr=>arr.length?((arr.reduce((a,b)=>a+Number(b.sco2),0))/arr.length).toFixed(1):null);
+        const temps = days.map(arr=>arr.length?((arr.reduce((a,b)=>a+Number(b.temp),0))/arr.length).toFixed(1):0);
+        const bpms  = days.map(arr=>arr.length?((arr.reduce((a,b)=>a+Number(b.bpm),0))/arr.length).toFixed(1):0);
+        const co2s  = days.map(arr=>arr.length?((arr.reduce((a,b)=>a+Number(b.sco2),0))/arr.length).toFixed(1):0);
         updateChart(charts.temp, dayNames, temps, "#fbbc05", "#e53935");
         updateChart(charts.bpm, dayNames, bpms, "#45b1e7", "#1976d2");
         updateChart(charts.co2, dayNames, co2s, "#4caf50", "#009688");
@@ -518,9 +664,9 @@
           bars[ts.getDate()-1].push(data);
         });
         const labels = Array.from({length:daysInMonth}, (_,i)=>(i+1).toString());
-        const temps = bars.map(arr=>arr.length?((arr.reduce((a,b)=>a+Number(b.temp),0))/arr.length).toFixed(1):null);
-        const bpms  = bars.map(arr=>arr.length?((arr.reduce((a,b)=>a+Number(b.bpm),0))/arr.length).toFixed(1):null);
-        const co2s  = bars.map(arr=>arr.length?((arr.reduce((a,b)=>a+Number(b.sco2),0))/arr.length).toFixed(1):null);
+        const temps = bars.map(arr=>arr.length?((arr.reduce((a,b)=>a+Number(b.temp),0))/arr.length).toFixed(1):0);
+        const bpms  = bars.map(arr=>arr.length?((arr.reduce((a,b)=>a+Number(b.bpm),0))/arr.length).toFixed(1):0);
+        const co2s  = bars.map(arr=>arr.length?((arr.reduce((a,b)=>a+Number(b.sco2),0))/arr.length).toFixed(1):0);
         updateChart(charts.temp, labels, temps, "#fbbc05", "#e53935");
         updateChart(charts.bpm, labels, bpms, "#45b1e7", "#1976d2");
         updateChart(charts.co2, labels, co2s, "#4caf50", "#009688");
