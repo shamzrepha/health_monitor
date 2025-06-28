@@ -13,7 +13,7 @@
       --primary: #45b1e7;
       --primary-dark: #3592bb;
       --bg: #f9fbfd;
-      --card-bg: #fff;sso
+      --card-bg: #fff;
       --accent: #fbbc05;
       --alert: #f44336;
       --border-radius: 16px;
@@ -421,7 +421,6 @@
 
     viewSelect.addEventListener('change', () => {
       monthPicker.style.display = viewSelect.value === 'month' ? 'inline-block' : 'none';
-      // if switching away from history, clear date
       if (historyDate.value) {
         historyDate.value = "";
         historyTableSection.style.display = "none";
@@ -429,10 +428,7 @@
       loadData();
     });
     monthPicker.addEventListener('change', loadData);
-    historyDate.addEventListener('change', () => {
-      // Hide the summary views if a date is picked
-      loadData();
-    });
+    historyDate.addEventListener('change', loadData);
 
     function formatHour(hour) {
       const h = hour % 12 || 12;
@@ -442,7 +438,6 @@
 
     function updateChart(chart, labels, values, color, highlight) {
       chart.data.labels = labels;
-      // Fill in 0 for missing/null so bars always appear
       chart.data.datasets[0].data = values.map(v => (v === null || v === undefined) ? 0 : parseFloat(v));
       chart.data.datasets[0].backgroundColor = getBarColors(color, highlight, values.length);
       chart.update();
@@ -499,64 +494,46 @@
       }
     };
 
+    // Real-time update for charts (NEW!)
+    db.ref('readings').on('child_added', function(snapshot) {
+      loadData();
+    });
+
     async function loadData() {
       const now = new Date();
       const view = viewSelect.value;
       const history = historyDate.value;
 
-      // --- PATIENT HISTORY MODE ---
+      // ----------- PATIENT HISTORY MODE -----------
       if (history) {
-        // Hide month picker, as patient history is active
         monthPicker.style.display = "none";
-        // Date range for that day
         const [yyyy, mm, dd] = history.split('-').map(Number);
         const start = new Date(yyyy, mm-1, dd, 0, 0, 0).getTime();
         const end = new Date(yyyy, mm-1, dd, 23, 59, 59, 999).getTime();
-
-        // Fetch all readings for the selected date
-        const snap = await db.ref('readings')
-          .orderByChild('timestamp')
-          .startAt(start)
-          .endAt(end)
-          .get();
-
+        const snap = await db.ref('readings').orderByChild('timestamp').startAt(start).endAt(end).get();
         let readings = [];
-        if (snap.exists()) {
-          snap.forEach(child => {
-            readings.push(child.val());
-          });
-        }
-
-        // Sort by timestamp just in case
+        if (snap.exists()) snap.forEach(child => readings.push(child.val()));
         readings.sort((a, b) => a.timestamp - b.timestamp);
-
-        // Chart: show as line chart for history (convert chart type if needed)
         ["temp", "bpm", "co2"].forEach((key, idx) => {
           const chart = charts[key];
-          // Switch to line chart if not already
           if (chart.config.type !== 'line') {
             chart.config.type = 'line';
             chart.options.scales.x.type = "category";
           }
         });
-
         const labels = readings.map(d => {
           const t = new Date(d.timestamp);
           return t.toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", second: "2-digit"});
         });
-        const temps = readings.map(d => d.temp !== undefined ? parseFloat(d.temp) : null);
-        const bpms = readings.map(d => d.bpm !== undefined ? parseFloat(d.bpm) : null);
-        const co2s = readings.map(d => d.sco2 !== undefined ? parseFloat(d.sco2) : null);
-
+        const temps = readings.map(d => d.temp !== undefined ? parseFloat(d.temp) : 0);
+        const bpms = readings.map(d => d.bpm !== undefined ? parseFloat(d.bpm) : 0);
+        const co2s = readings.map(d => d.sco2 !== undefined ? parseFloat(d.sco2) : 0);
         updateChart(charts.temp, labels, temps, "#fbbc05", "#e53935");
         updateChart(charts.bpm, labels, bpms, "#45b1e7", "#1976d2");
         updateChart(charts.co2, labels, co2s, "#4caf50", "#009688");
-
-        // Show readings in table
         populateHistoryTable(readings);
         return;
       } else {
-        // If not in history mode, always use bar chart
         ["temp", "bpm", "co2"].forEach(key => {
           const chart = charts[key];
           if (chart.config.type !== 'bar') {
@@ -566,22 +543,25 @@
         historyTableSection.style.display = "none";
       }
 
-      // --- LIVE/DAY/WEEK/MONTH MODES ---
-      const snap = await db.ref('readings').orderByChild('timestamp').limitToLast(500).get();
+      // ----------- ALWAYS GET THE LAST 30 READINGS FOR CHARTS (so even if you just started, you see something!) -----------
+      const snap = await db.ref('readings').orderByChild('timestamp').limitToLast(30).get();
+      let readings = [];
+      if (snap.exists()) snap.forEach(child => readings.push(child.val()));
 
-      if (!snap.exists()) {
+      if (readings.length === 0) {
         updateChart(charts.temp, [], [], "#fbbc05", "#e53935");
         updateChart(charts.bpm, [], [], "#45b1e7", "#1976d2");
         updateChart(charts.co2, [], [], "#4caf50", "#009688");
         return;
       }
 
+      // ----------- LIVE (1MIN) MODE -----------
       if (view === '1min') {
-        let nowTs = Date.now();
-        let slots = Array.from({length:12}, (_,i)=>nowTs - (11-i)*5000);
-        let barData = Array.from({length:12}, ()=>[]);
-        snap.forEach(child => {
-          const data = child.val();
+        // Group the last 30 readings into 12 slots (5s each, ~1min), fallback to plotting all if not enough
+        const nowTs = Date.now();
+        const slots = Array.from({length:12}, (_,i)=>nowTs - (11-i)*5000);
+        const barData = Array.from({length:12}, ()=>[]);
+        readings.forEach(data => {
           const ts = typeof data.timestamp === "number" ? data.timestamp : new Date(data.timestamp).getTime();
           for(let i=0;i<12;i++) {
             if(ts >= slots[i] && ts < slots[i]+5000) {
@@ -600,10 +580,10 @@
         return;
       }
 
+      // ----------- TODAY MODE -----------
       if (view === "day") {
         let bars = Array.from({length:24}, ()=>[]);
-        snap.forEach(child => {
-          const data = child.val();
+        readings.forEach(data => {
           const ts = new Date(data.timestamp);
           if (ts.toDateString() !== now.toDateString()) return;
           bars[ts.getHours()].push(data);
@@ -618,13 +598,13 @@
         return;
       }
 
+      // ----------- WEEK MODE -----------
       if (view==="week") {
         let weekAgo = new Date(now);
         weekAgo.setHours(0,0,0,0);
         weekAgo.setDate(now.getDate()-6);
         let days = Array.from({length:7}, ()=>[]);
-        snap.forEach(child => {
-          const data = child.val();
+        readings.forEach(data => {
           const ts = new Date(data.timestamp);
           if (ts >= weekAgo && ts <= now) {
             let dayIdx = Math.floor((ts-weekAgo)/(24*60*60*1000));
@@ -646,6 +626,7 @@
         return;
       }
 
+      // ----------- MONTH MODE -----------
       if (view==="month") {
         if (!monthPicker.value) {
           updateChart(charts.temp, [], [], "#fbbc05", "#e53935");
@@ -657,8 +638,7 @@
         const selectedMonth = new Date(Number(yyyy), Number(mm)-1, 1);
         let daysInMonth = new Date(Number(yyyy), Number(mm), 0).getDate();
         let bars = Array.from({length:daysInMonth}, ()=>[]);
-        snap.forEach(child => {
-          const data = child.val();
+        readings.forEach(data => {
           const ts = new Date(data.timestamp);
           if (ts.getMonth()!==selectedMonth.getMonth() || ts.getFullYear()!==selectedMonth.getFullYear()) return;
           bars[ts.getDate()-1].push(data);
@@ -672,9 +652,30 @@
         updateChart(charts.co2, labels, co2s, "#4caf50", "#009688");
         return;
       }
+
+      // ----------- FALLBACK: SHOW LAST 30 READINGS AS LINES -----------
+      {
+        ["temp", "bpm", "co2"].forEach((key, idx) => {
+          const chart = charts[key];
+          if (chart.config.type !== 'line') {
+            chart.config.type = 'line';
+            chart.options.scales.x.type = "category";
+          }
+        });
+        const labels = readings.map(d => {
+          const t = new Date(d.timestamp);
+          return t.toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", second: "2-digit"});
+        });
+        const temps = readings.map(d => d.temp !== undefined ? parseFloat(d.temp) : 0);
+        const bpms = readings.map(d => d.bpm !== undefined ? parseFloat(d.bpm) : 0);
+        const co2s = readings.map(d => d.sco2 !== undefined ? parseFloat(d.sco2) : 0);
+        updateChart(charts.temp, labels, temps, "#fbbc05", "#e53935");
+        updateChart(charts.bpm, labels, bpms, "#45b1e7", "#1976d2");
+        updateChart(charts.co2, labels, co2s, "#4caf50", "#009688");
+      }
     }
 
-    setInterval(loadData, 3000);
+    // No setInterval! Real-time only.
     loadData();
   </script>
 </body>
