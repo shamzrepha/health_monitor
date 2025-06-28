@@ -1,284 +1,140 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Health Monitor Dashboard</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
-    body { font-family: Arial, sans-serif; margin: 30px; background:#f6f9fb;}
-    .live-header {
-      max-width: 700px; margin: 0 auto 2em auto; 
-      display: flex; justify-content: space-between; align-items: center;
-      background: linear-gradient(90deg,#e3f2fd,#fff); border-radius: 14px; box-shadow: 0 2px 8px #0002; padding: 1.2em 2.5em;
-      font-size: 1.1em; font-weight: bold; letter-spacing: 1px;
+    body {
+      font-family: Arial, sans-serif;
+      padding: 20px;
+      background: #f0f4f8;
     }
-    .live-item {display:flex;align-items:center;gap:6px;}
-    .live-label {color:#1976d2;}
-    .live-value {font-size:2em;color:#2196f3;margin-right:5px;}
-    .live-unit {font-size:1em;color:#999;}
-    #chartDiv { max-width: 700px; margin: 0 auto 2em auto; background: #fff; border-radius: 14px; box-shadow: 0 2px 8px #0001; padding: 1.2em 2.5em;}
-    #controls { display: flex; gap: 1em; flex-wrap: wrap; align-items:center; margin-bottom: 10px;}
-    #readingList { max-width: 700px; margin: 0 auto; background: #fff; border-radius: 14px; box-shadow: 0 2px 8px #0001; padding: 1.2em 2.5em;}
-    #readingList h3 {margin-top:0;}
-    #readings {height:150px;overflow-y:auto;}
-    label {font-weight: 600;}
-    select, input[type="date"] {padding: 2px 8px;}
-    #toLabel {margin: 0 3px;}
-    #applyRange {padding: 3px 10px;}
+    h1 {
+      text-align: center;
+      margin-bottom: 20px;
+    }
+    .filter {
+      text-align: center;
+      margin-bottom: 30px;
+    }
+    .chart-container {
+      max-width: 800px;
+      margin: 0 auto 50px auto;
+      background: #fff;
+      padding: 20px;
+      border-radius: 10px;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    }
   </style>
 </head>
 <body>
-  <h1 style="text-align:center;">Health Monitor Dashboard</h1>
-  
-  <!-- LIVE HEADER -->
-  <div class="live-header" id="liveHeader">
-    <div class="live-item">
-      <span class="live-label">Temp:</span>
-      <span id="liveTemp" class="live-value">--</span>
-      <span class="live-unit">°C</span>
-    </div>
-    <div class="live-item">
-      <span class="live-label">BPM:</span>
-      <span id="liveBpm" class="live-value">--</span>
-    </div>
-    <div class="live-item">
-      <span class="live-label">SpO₂:</span>
-      <span id="liveSpo2" class="live-value">--</span>
-      <span class="live-unit">%</span>
-    </div>
+  <h1>Health Monitor Dashboard</h1>
+
+  <div class="filter">
+    <label for="timeRange">Select Time Range: </label>
+    <select id="timeRange">
+      <option value="1">Today</option>
+      <option value="7">Last 7 Days</option>
+      <option value="30">Last 30 Days</option>
+    </select>
   </div>
 
-  <div id="chartDiv">
-    <div id="controls">
-      <label for="dataType">Chart:</label>
-      <select id="dataType">
-        <option value="temp">Temperature (°C)</option>
-        <option value="bpm">BPM</option>
-        <option value="spo2">SpO₂ (%)</option>
-      </select>
-      <label for="timeRange">View:</label>
-      <select id="timeRange">
-        <option value="day">Daily</option>
-        <option value="week">Weekly</option>
-        <option value="month">Monthly</option>
-        <option value="custom">Custom</option>
-      </select>
-      <input type="date" id="startDate" style="display:none;">
-      <span id="toLabel" style="display:none;">to</span>
-      <input type="date" id="endDate" style="display:none;">
-      <button id="applyRange" style="display:none;">Apply</button>
-    </div>
-    <canvas id="mainChart" width="600" height="250"></canvas>
+  <div class="chart-container">
+    <h3>Temperature (°C)</h3>
+    <canvas id="tempChart"></canvas>
   </div>
 
-  <div id="readingList">
-    <h3>Recent Readings:</h3>
-    <ul id="readings"></ul>
+  <div class="chart-container">
+    <h3>Heart Rate (BPM)</h3>
+    <canvas id="bpmChart"></canvas>
+  </div>
+
+  <div class="chart-container">
+    <h3>sCO₂ (ppm)</h3>
+    <canvas id="co2Chart"></canvas>
   </div>
 
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-app.js";
-    import { getDatabase, ref, onValue, query, orderByChild, limitToLast } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-database.js";
-    import Chart from "https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js";
+    import { getFirestore, collection, query, orderBy, getDocs } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore.js";
 
-    // Your Firebase config
     const firebaseConfig = {
-      apiKey: "AIzaSyDssbC1dIiDmACxzSs9Kn-vA-cRT3MLKzk",
-      authDomain: "healthmonitorapp-47655.firebaseapp.com",
-      databaseURL: "https://healthmonitorapp-47655-default-rtdb.firebaseio.com",
-      projectId: "healthmonitorapp-47655",
-      storageBucket: "healthmonitorapp-47655.appspot.com",
-      messagingSenderId: "831668449943",
-      appId: "1:831668449943:web:b9ae8fdd50de8fc4d2efd2",
-      measurementId: "G-BPCV50PSCF"
+      apiKey: "AIzaSyBBAvRnaZxvYqy3tj7rJ--EYojSH8wQHMY",
+      authDomain: "heal-9faa0.firebaseapp.com",
+      projectId: "heal-9faa0",
+      storageBucket: "heal-9faa0.firebasestorage.app",
+      messagingSenderId: "265082548829",
+      appId: "1:265082548829:web:3aededa684fa98a17ed3b4",
+      measurementId: "G-P7TNMCCYJ0"
     };
 
-    // Firebase init
     const app = initializeApp(firebaseConfig);
-    const db = getDatabase(app);
+    const db = getFirestore(app);
 
-    // Chart.js setup
-    let chart;
-    let chartLabels = [];
-    let chartData = [];
-    let currentType = 'temp';
-    let historyArr = [];
+    const tempChart = createChart('tempChart', 'red');
+    const bpmChart = createChart('bpmChart', 'blue');
+    const co2Chart = createChart('co2Chart', 'green');
 
-    function formatTime(ts) {
-      if (!ts) return '--';
-      const d = new Date(ts);
-      return d.toLocaleString();
-    }
+    document.getElementById('timeRange').addEventListener('change', loadData);
 
-    function updateChart(history, type) {
-      chartLabels.length = 0;
-      chartData.length = 0;
-      history.forEach(r => {
-        chartLabels.push(r.timestamp ? formatTime(r.timestamp) : "");
-        chartData.push(r[type]);
+    async function loadData() {
+      const days = parseInt(document.getElementById('timeRange').value);
+      const cutoff = Date.now() - (days * 24 * 60 * 60 * 1000);
+      const snapshot = await getDocs(query(collection(db, 'readings'), orderBy('timestamp')));
+
+      const labels = [];
+      const tempData = [];
+      const bpmData = [];
+      const co2Data = [];
+
+      snapshot.forEach(doc => {
+        const data = doc.data();
+        const ts = parseInt(data.timestamp);
+        if (ts > cutoff) {
+          const timeLabel = new Date(ts).toLocaleString();
+          labels.push(timeLabel);
+          tempData.push(data.temp?.doubleValue || 0);
+          bpmData.push(data.bpm?.integerValue || 0);
+          co2Data.push(data.sco2?.doubleValue || 0);
+        }
       });
-      if (chart) chart.update();
+
+      updateChart(tempChart, labels, tempData);
+      updateChart(bpmChart, labels, bpmData);
+      updateChart(co2Chart, labels, co2Data);
     }
 
-    function updateLiveHeader(latest) {
-      document.getElementById('liveTemp').textContent = latest.temp !== undefined ? latest.temp : '--';
-      document.getElementById('liveBpm').textContent = latest.bpm !== undefined ? latest.bpm : '--';
-      document.getElementById('liveSpo2').textContent = latest.spo2 !== undefined ? latest.spo2 : '--';
-    }
-
-    // Setup chart after DOM ready
-    window.addEventListener('DOMContentLoaded', () => {
-      const ctx = document.getElementById('mainChart').getContext('2d');
-      chart = new Chart(ctx, {
+    function createChart(id, color) {
+      return new Chart(document.getElementById(id), {
         type: 'line',
         data: {
-          labels: chartLabels,
+          labels: [],
           datasets: [{
-            label: 'Temperature (°C)',
-            data: chartData,
-            borderColor: '#2196f3',
-            backgroundColor: 'rgba(33,150,243,0.08)',
-            fill: true,
-            tension: 0.13,
-            pointRadius: 2,
+            data: [],
+            borderColor: color,
+            fill: false,
+            tension: 0.2
           }]
         },
         options: {
-          animation: false,
           responsive: true,
-          plugins: { legend: { display: true } },
           scales: {
-            x: { title: { display: true, text: 'Time' } },
-            y: { title: { display: true, text: 'Value' } }
+            x: { ticks: { autoSkip: true, maxTicksLimit: 10 } },
+            y: { beginAtZero: true }
           }
         }
       });
-    });
-
-    // Listen for history (last 200 readings for filtering)
-    const historyRef = query(ref(db, '/sensors/device1/history'), orderByChild('timestamp'), limitToLast(200));
-    onValue(historyRef, (snapshot) => {
-      historyArr = [];
-      if (snapshot.exists()) {
-        snapshot.forEach(childSnap => {
-          const val = childSnap.val();
-          historyArr.push(val);
-        });
-        // Sort by timestamp, oldest first
-        historyArr.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
-        // Default: show today's data
-        if (!window.__chartFiltered) filterAndPlotByDate(getTodayStart(), getTomorrowStart());
-        // Update live header
-        if (historyArr.length > 0) {
-          updateLiveHeader(historyArr[historyArr.length - 1]);
-        }
-        // Update reading list
-        updateReadingList(historyArr);
-      }
-    });
-
-    function updateReadingList(arr) {
-      const readingsUl = document.getElementById('readings');
-      readingsUl.innerHTML = '';
-      arr.slice().reverse().forEach(r => {
-        const li = document.createElement('li');
-        li.textContent = `Temp: ${r.temp ?? '--'} °C, BPM: ${r.bpm ?? '--'}, SpO₂: ${r.spo2 ?? '--'}% @ ${r.timestamp ? formatTime(r.timestamp) : ''}`;
-        readingsUl.appendChild(li);
-      });
     }
 
-    // Chart data type selector
-    document.getElementById('dataType').addEventListener('change', function() {
-      currentType = this.value;
-      // Update chart label
-      const typeLabel = {
-        temp: 'Temperature (°C)',
-        bpm: 'BPM',
-        spo2: 'SpO₂ (%)'
-      };
-      chart.data.datasets[0].label = typeLabel[currentType];
-      // Re-filter based on current selected range
-      if (window.__chartFiltered) filterAndPlotByDate(window.__chartFiltered[0], window.__chartFiltered[1]);
-    });
-
-    // Time range controls
-    function getTodayStart() {
-      const now = new Date();
-      return new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    }
-    function getTomorrowStart() {
-      const t = getTodayStart();
-      t.setDate(t.getDate() + 1); return t;
-    }
-    function getWeekStart() {
-      const now = new Date();
-      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-      d.setDate(d.getDate() - d.getDay());
-      return d;
-    }
-    function getNextWeekStart() {
-      const d = getWeekStart();
-      d.setDate(d.getDate() + 7); return d;
-    }
-    function getMonthStart() {
-      const now = new Date();
-      return new Date(now.getFullYear(), now.getMonth(), 1);
-    }
-    function getNextMonthStart() {
-      const now = new Date();
-      return new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    function updateChart(chart, labels, data) {
+      chart.data.labels = labels;
+      chart.data.datasets[0].data = data;
+      chart.update();
     }
 
-    // Range UI logic
-    document.getElementById('timeRange').addEventListener('change', function() {
-      const val = this.value;
-      const startDate = document.getElementById('startDate');
-      const endDate = document.getElementById('endDate');
-      const toLabel = document.getElementById('toLabel');
-      const applyBtn = document.getElementById('applyRange');
-      startDate.style.display = 'none';
-      endDate.style.display = 'none';
-      toLabel.style.display = 'none';
-      applyBtn.style.display = 'none';
-      let start, end;
-      if (val === 'custom') {
-        startDate.style.display = '';
-        endDate.style.display = '';
-        toLabel.style.display = '';
-        applyBtn.style.display = '';
-        // Clear previous filter until user applies
-        window.__chartFiltered = null;
-      } else {
-        if (val === 'day') {
-          start = getTodayStart();
-          end = getTomorrowStart();
-        } else if (val === 'week') {
-          start = getWeekStart();
-          end = getNextWeekStart();
-        } else if (val === 'month') {
-          start = getMonthStart();
-          end = getNextMonthStart();
-        }
-        filterAndPlotByDate(start, end);
-      }
-    });
-
-    document.getElementById('applyRange').addEventListener('click', function() {
-      const start = new Date(document.getElementById('startDate').value);
-      const end = new Date(document.getElementById('endDate').value);
-      if (start && end && end > start) {
-        filterAndPlotByDate(start, end);
-      }
-    });
-
-    function filterAndPlotByDate(start, end) {
-      window.__chartFiltered = [start, end];
-      // Filter readings by timestamp
-      const filtered = historyArr.filter(r => r.timestamp &&
-        new Date(r.timestamp) >= start && new Date(r.timestamp) < end
-      );
-      updateChart(filtered, currentType);
-    }
+    loadData();
   </script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </body>
 </html>
