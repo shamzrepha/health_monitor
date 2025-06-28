@@ -3,23 +3,53 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Patient History Dashboard</title>
+  <title>Patient Health Dashboard</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
     body { font-family: 'Montserrat', Arial, sans-serif; background: #f9fbfd; margin:0; }
     header { background: #45b1e7; color: #fff; text-align: center; padding: 2rem 0; }
-    .controls { text-align:center; margin:2em 0 1em 0;}
+    .live-section {
+      max-width: 900px; margin: -42px auto 0 auto; display: flex; justify-content: center; gap: 32px;
+      background: #fff; border-radius: 18px; box-shadow: 0 2px 12px #b2e1fa; padding: 2em 1.5em 1em 1.5em;
+      position: relative; z-index: 2;
+    }
+    .live-card {
+      min-width: 180px; text-align: center;
+      border-radius: 14px; background: #f8fcff; box-shadow: 0 1.5px 8px #d3eefa;
+      padding: 1.1em 1em 0.8em 1em; margin-bottom: 0.5em;
+    }
+    .live-label { font-size: 1.1em; color: #3592bb; margin-bottom: 0.4em; }
+    .live-value { font-size: 2.2em; font-weight: bold; margin-bottom: 0.2em; color: #fbbc05; }
+    .live-icon { font-size: 2.2em; color: #45b1e7; margin-bottom: 0.1em; }
+    .controls { text-align:center; margin:2.5em 0 1em 0;}
     .controls select, .controls input { font-size:1.05em; padding:0.3em 0.7em; margin:0 0.3em; border-radius:6px; border:1px solid #c7e3f6;}
-    .dashboard { max-width:950px; margin: 0 auto; background:#fff; border-radius:15px; box-shadow:0 2px 12px #b2e1fa; padding:2em;}
+    .dashboard { max-width:950px; margin: 0 auto; background:#fff; border-radius:15px; box-shadow:0 2px 12px #b2e1fa; padding:2em 1.5em;}
     .chart-card { margin:2em 0; }
     .chart-title { text-align:center; margin-bottom:8px; color:#3592bb; }
   </style>
 </head>
 <body>
   <header>
-    <h1>Patient History Dashboard</h1>
-    <p>Filter and visualize patient history from Google Sheets.</p>
+    <h1>Patient Health Dashboard</h1>
+    <p>Live readings and history from Google Sheets (auto-refreshing)</p>
   </header>
+  <div class="live-section">
+    <div class="live-card">
+      <div class="live-label">Temperature</div>
+      <div class="live-value" id="live-temp">--</div>
+      <div class="live-icon">🌡️ °C</div>
+    </div>
+    <div class="live-card">
+      <div class="live-label">Heart Rate</div>
+      <div class="live-value" id="live-bpm">--</div>
+      <div class="live-icon">❤️ BPM</div>
+    </div>
+    <div class="live-card">
+      <div class="live-label">sCO₂</div>
+      <div class="live-value" id="live-co2">--</div>
+      <div class="live-icon">🫁 %</div>
+    </div>
+  </div>
   <div class="controls">
     <label>View: 
       <select id="viewType">
@@ -49,9 +79,8 @@
     </div>
   </div>
   <script>
-    // ==== Replace this with your Apps Script Web App URL ====
-    const API_URL = 'YOUR_SCRIPT_URL'; // e.g. 'https://script.google.com/macros/s/AKfycb.../exec'
-    // ========================================================
+    // Your Apps Script Web App URL:
+    const API_URL = 'https://script.google.com/macros/s/AKfycbwpGtWauddjPJ3rFrdWCZe1bXHxCVp5Z27USRGw-e7XSSfG4q4PRrPF6AWWMT076zA/exec';
 
     // Chart.js setup
     let chartTemp = new Chart(document.getElementById('chartTemp'), {
@@ -78,6 +107,24 @@
       monthPicker.style.display       = viewType.value==='month' ? 'inline-block' : 'none';
     });
 
+    // Display latest reading instantly
+    async function updateLiveReading() {
+      try {
+        const res = await fetch(API_URL + '?last=1');
+        const arr = await res.json();
+        if (arr.length) {
+          const latest = arr[0];
+          document.getElementById('live-temp').textContent = latest.temp + ' °C';
+          document.getElementById('live-bpm').textContent  = latest.bpm;
+          document.getElementById('live-co2').textContent  = latest.sco2 + ' %';
+        }
+      } catch (e) {
+        document.getElementById('live-temp').textContent = '--';
+        document.getElementById('live-bpm').textContent  = '--';
+        document.getElementById('live-co2').textContent  = '--';
+      }
+    }
+
     // Main loadData function
     async function loadData() {
       let url = API_URL;
@@ -101,14 +148,11 @@
         chartTemp.data.labels = chartBPM.data.labels = chartCO2.data.labels = [];
         chartTemp.data.datasets[0].data = chartBPM.data.datasets[0].data = chartCO2.data.datasets[0].data = [];
         chartTemp.update(); chartBPM.update(); chartCO2.update();
-        alert('No data for selected period.');
         return;
       }
 
       let labels=[], temps=[], bpms=[], co2s=[];
       if (mode === '1min') {
-        // Most recent 12 readings
-        // Show as-is
         labels = records.map(r=>{
           let d = new Date(r.timestamp);
           return d.toLocaleTimeString();
@@ -117,7 +161,6 @@
         bpms  = records.map(r=>Number(r.bpm));
         co2s  = records.map(r=>Number(r.sco2));
       } else if (mode === 'day') {
-        // Hourly average
         let hourly = Array.from({length:24}, ()=>[]);
         records.forEach(r=>{
           let h = new Date(r.timestamp).getHours();
@@ -128,7 +171,6 @@
         bpms  = hourly.map(arr=>arr.length?avg(arr.map(r=>Number(r.bpm))):null);
         co2s  = hourly.map(arr=>arr.length?avg(arr.map(r=>Number(r.sco2))):null);
       } else if (mode === 'week') {
-        // Each day in week, average
         let start = new Date(weekStartPicker.value);
         let days = Array.from({length:7}, ()=>[]);
         records.forEach(r=>{
@@ -144,7 +186,6 @@
         bpms  = days.map(arr=>arr.length?avg(arr.map(r=>Number(r.bpm))):null);
         co2s  = days.map(arr=>arr.length?avg(arr.map(r=>Number(r.sco2))):null);
       } else if (mode === 'month') {
-        // Each day in month, average
         let days = {};
         records.forEach(r=>{
           let d = new Date(r.timestamp).getDate();
@@ -164,13 +205,15 @@
     }
     function avg(arr) { return (arr.reduce((a,b)=>a+b,0)/arr.length).toFixed(1); }
 
-    // Live update for 1 minute mode
+    // Live update for instant reading and 1min graph
     setInterval(()=>{
+      updateLiveReading();
       if (viewType.value === '1min') loadData();
     }, 5000);
 
     window.onload = ()=>{
       viewType.value = '1min';
+      updateLiveReading();
       loadData();
     };
   </script>
