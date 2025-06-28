@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Health Monitor</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.0.0/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.0.0/firebase-firestore.js"></script>
+</head>
+<body>
+  <h2>Temperature Chart</h2>
+  <canvas id="tempChart" width="400" height="200"></canvas>
+
+  <script>
+    // Paste your config here
+    const firebaseConfig = {
+      apiKey: "...",
+      authDomain: "...",
+      projectId: "...",
+    };
+
+    const app = firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+
+    const ctx = document.getElementById('tempChart').getContext('2d');
+    const tempChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: [],
+        datasets: [{
+          label: 'Temp (°C)',
+          data: [],
+          borderColor: 'red',
+          tension: 0.2
+        }]
+      },
+      options: {
+        responsive: true
+      }
+    });
+
+    db.collection("readings").orderBy("timestamp", "desc").limit(10).onSnapshot(snapshot => {
+      const labels = [];
+      const temps = [];
+      snapshot.forEach(doc => {
+        const d = doc.data();
+        labels.unshift(new Date().toLocaleTimeString());
+        temps.unshift(d.temp.doubleValue);
+      });
+      tempChart.data.labels = labels;
+      tempChart.data.datasets[0].data = temps;
+      tempChart.update();
+    });
+  </script>
+</body>
+</html>
