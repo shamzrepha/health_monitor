@@ -21,12 +21,7 @@
       --text-main: #222;
       --text-light: #586377;
     }
-
-    html, body {
-      height: 100%;
-      margin: 0;
-      box-sizing: border-box;
-    }
+    html, body { height: 100%; margin: 0; box-sizing: border-box; }
     body {
       font-family: 'Montserrat', Arial, sans-serif;
       background: linear-gradient(120deg, #f9fbfd 70%, #e6f2fb 100%);
@@ -54,7 +49,6 @@
       font-weight: 400;
       color: #e1f4fc;
     }
-
     .dashboard {
       max-width: 1100px;
       margin: -48px auto 0 auto;
@@ -80,23 +74,6 @@
       position: relative;
       transition: box-shadow 0.3s;
     }
-    .live-card:not(:last-child)::after {
-      content: '';
-      position: absolute;
-      right: -18px;
-      top: 50%;
-      transform: translateY(-50%);
-      width: 2px;
-      height: 40px;
-      background: #e3eef8;
-      border-radius: 3px;
-      display: none;
-    }
-    @media (min-width: 700px) {
-      .live-card:not(:last-child)::after {
-        display: block;
-      }
-    }
     .live-icon {
       font-size: 2.6rem;
       margin-bottom: 8px;
@@ -116,7 +93,6 @@
       font-weight: 400;
       letter-spacing: 1px;
     }
-
     .filter-bar {
       display: flex;
       align-items: center;
@@ -144,7 +120,6 @@
     .filter-bar select:focus, .filter-bar input[type="month"]:focus {
       border: 1.5px solid var(--primary);
     }
-
     .chart-section {
       display: grid;
       grid-template-columns: 1fr;
@@ -180,7 +155,6 @@
       max-width: 340px;
       max-height: 180px;
     }
-
     .sos-alert {
       position: fixed;
       top: 0; left: 0; width: 100%; height: 100%;
@@ -203,7 +177,6 @@
       50% { opacity: 0.6; }
       100% { opacity: 1; }
     }
-
     .footer {
       text-align: center;
       padding: 28px 0 10px 0;
@@ -321,7 +294,7 @@
       }
     });
 
-    // Proper value mapping for each chart
+    // Chart instances
     const charts = {
       temp: new Chart(document.getElementById('chartTemp'), chartOptions('#fbbc05', 20, 45, 'Temperature (°C)')),
       bpm: new Chart(document.getElementById('chartBPM'), chartOptions('#45b1e7', 50, 150, 'Heart Rate (BPM)')),
@@ -354,65 +327,132 @@
       }
     });
 
+    // Helper: Format hour to "12am", "1am", ..., "11pm"
+    function formatHour(hour) {
+      const h = hour % 12 || 12;
+      const ampm = hour < 12 ? "am" : "pm";
+      return `${h}${ampm}`;
+    }
+
+    // For weekly/day/monthly/minute view aggregation:
     async function loadData() {
       const now = new Date();
       const view = viewSelect.value;
-      const snap = await db.ref('readings').orderByChild('timestamp').limitToLast(300).get();
+      const snap = await db.ref('readings').orderByChild('timestamp').limitToLast(400).get();
 
-      const groups = {};
-      snap.forEach(child => {
-        const data = child.val();
-        const ts = new Date(data.timestamp);
+      // For the 1min view, we want 12 bars, each is 5 seconds.
+      if (view === '1min') {
+        // Create 12 slots, each 5 seconds
+        let nowTs = Date.now();
+        let slots = Array.from({length:12}, (_,i)=>nowTs - (11-i)*5000);
+        let barData = Array.from({length:12}, ()=>[]);
+        snap.forEach(child => {
+          const data = child.val();
+          const ts = typeof data.timestamp === "number" ? data.timestamp : new Date(data.timestamp).getTime();
+          for(let i=0;i<12;i++) {
+            // Each slot is [slot[i], slot[i]+5s]
+            if(ts >= slots[i] && ts < slots[i]+5000) {
+              barData[i].push(data);
+              break;
+            }
+          }
+        });
+        // Remove old bars if more than 12
+        // Compute averages, oldest left, newest right
+        const labels = Array.from({length:12}, (_,i)=>`${(i-11)*5<0?-(i-11)*5:0}s ago`).reverse();
+        const temps = barData.map(arr=>arr.length?((arr.reduce((a,b)=>a+Number(b.temp),0))/arr.length).toFixed(1):null);
+        const bpms  = barData.map(arr=>arr.length?((arr.reduce((a,b)=>a+Number(b.bpm),0))/arr.length).toFixed(1):null);
+        const co2s  = barData.map(arr=>arr.length?((arr.reduce((a,b)=>a+Number(b.sco2),0))/arr.length).toFixed(1):null);
+        updateChart(charts.temp, labels, temps);
+        updateChart(charts.bpm, labels, bpms);
+        updateChart(charts.co2, labels, co2s);
+        return;
+      }
 
-        if (view === '1min') {
-          if ((now - ts) > 60000) return;
-          const slot = Math.floor((now - ts) / 5000);
-          const label = `${60 - slot*5}s ago`;
-          groups[label] = groups[label] || [];
-          groups[label].push(data);
-        } else if (view === 'day') {
+      // For daily, 24 bars: average per hour
+      if (view === "day") {
+        let bars = Array.from({length:24}, ()=>[]);
+        snap.forEach(child => {
+          const data = child.val();
+          const ts = new Date(data.timestamp);
           if (ts.toDateString() !== now.toDateString()) return;
-          const hour = ts.getHours();
-          groups[hour] = groups[hour] || [];
-          groups[hour].push(data);
-        } else if (view === 'week') {
-          const weekAgo = new Date();
-          weekAgo.setDate(now.getDate() - 7);
-          if (ts < weekAgo) return;
-          const weekday = ts.toLocaleDateString(undefined, { weekday: 'short' });
-          groups[weekday] = groups[weekday] || [];
-          groups[weekday].push(data);
-        } else if (view === 'month') {
-          const selected = new Date(monthPicker.value);
-          if (!monthPicker.value || ts.getMonth() !== selected.getMonth() || ts.getFullYear() !== selected.getFullYear()) return;
-          const day = ts.getDate();
-          groups[day] = groups[day] || [];
-          groups[day].push(data);
+          bars[ts.getHours()].push(data);
+        });
+        const labels = Array.from({length:24}, (_,i)=>formatHour(i));
+        const temps = bars.map(arr=>arr.length?((arr.reduce((a,b)=>a+Number(b.temp),0))/arr.length).toFixed(1):null);
+        const bpms  = bars.map(arr=>arr.length?((arr.reduce((a,b)=>a+Number(b.bpm),0))/arr.length).toFixed(1):null);
+        const co2s  = bars.map(arr=>arr.length?((arr.reduce((a,b)=>a+Number(b.sco2),0))/arr.length).toFixed(1):null);
+        updateChart(charts.temp, labels, temps);
+        updateChart(charts.bpm, labels, bpms);
+        updateChart(charts.co2, labels, co2s);
+        return;
+      }
+
+      // For week: 7 bars, Sun-Sat, average per day
+      if (view==="week") {
+        // Get 7 days ago (start of today minus 6)
+        let weekAgo = new Date(now);
+        weekAgo.setHours(0,0,0,0);
+        weekAgo.setDate(now.getDate()-6);
+        let days = Array.from({length:7}, ()=>[]);
+        snap.forEach(child => {
+          const data = child.val();
+          const ts = new Date(data.timestamp);
+          // Place into correct day slot (0=oldest, 6=today)
+          if (ts >= weekAgo && ts <= now) {
+            let dayIdx = Math.floor((ts-weekAgo)/(24*60*60*1000));
+            days[dayIdx].push(data);
+          }
+        });
+        // Label days as Sun, Mon, ..., Sat
+        let dayNames = [];
+        for(let i=0;i<7;i++) {
+          let d = new Date(weekAgo);
+          d.setDate(weekAgo.getDate()+i);
+          dayNames.push(d.toLocaleDateString(undefined, {weekday:"short"}));
         }
-      });
+        const temps = days.map(arr=>arr.length?((arr.reduce((a,b)=>a+Number(b.temp),0))/arr.length).toFixed(1):null);
+        const bpms  = days.map(arr=>arr.length?((arr.reduce((a,b)=>a+Number(b.bpm),0))/arr.length).toFixed(1):null);
+        const co2s  = days.map(arr=>arr.length?((arr.reduce((a,b)=>a+Number(b.sco2),0))/arr.length).toFixed(1):null);
+        updateChart(charts.temp, dayNames, temps);
+        updateChart(charts.bpm, dayNames, bpms);
+        updateChart(charts.co2, dayNames, co2s);
+        return;
+      }
 
-      const labels = Object.keys(groups).sort((a, b) => {
-        const aNum = Number(a), bNum = Number(b);
-        return (!isNaN(aNum) && !isNaN(bNum)) ? aNum - bNum : a.localeCompare(b);
-      });
-      const temps = [], bpms = [], co2s = [];
-
-      labels.forEach(label => {
-        const group = groups[label];
-        const avg = arr => arr.reduce((a, b) => a + parseFloat(b || 0), 0) / arr.length;
-        temps.push(avg(group.map(x => x.temp)).toFixed(1));
-        bpms.push(avg(group.map(x => x.bpm)).toFixed(1));
-        co2s.push(avg(group.map(x => x.sco2)).toFixed(1));
-      });
-
-      updateChart(charts.temp, labels, temps);
-      updateChart(charts.bpm, labels, bpms);
-      updateChart(charts.co2, labels, co2s);
+      // For month: 28-31 bars, one per day (of selected month)
+      if (view==="month") {
+        if (!monthPicker.value) {
+          // Show empty
+          updateChart(charts.temp, [], []);
+          updateChart(charts.bpm, [], []);
+          updateChart(charts.co2, [], []);
+          return;
+        }
+        const [yyyy,mm]=monthPicker.value.split("-");
+        const selectedMonth = new Date(Number(yyyy), Number(mm)-1, 1);
+        let daysInMonth = new Date(Number(yyyy), Number(mm), 0).getDate();
+        let bars = Array.from({length:daysInMonth}, ()=>[]);
+        snap.forEach(child => {
+          const data = child.val();
+          const ts = new Date(data.timestamp);
+          if (ts.getMonth()!==selectedMonth.getMonth() || ts.getFullYear()!==selectedMonth.getFullYear()) return;
+          bars[ts.getDate()-1].push(data);
+        });
+        const labels = Array.from({length:daysInMonth}, (_,i)=>(i+1).toString());
+        const temps = bars.map(arr=>arr.length?((arr.reduce((a,b)=>a+Number(b.temp),0))/arr.length).toFixed(1):null);
+        const bpms  = bars.map(arr=>arr.length?((arr.reduce((a,b)=>a+Number(b.bpm),0))/arr.length).toFixed(1):null);
+        const co2s  = bars.map(arr=>arr.length?((arr.reduce((a,b)=>a+Number(b.sco2),0))/arr.length).toFixed(1):null);
+        updateChart(charts.temp, labels, temps);
+        updateChart(charts.bpm, labels, bpms);
+        updateChart(charts.co2, labels, co2s);
+        return;
+      }
     }
 
     function updateChart(chart, labels, values) {
       chart.data.labels = labels;
-      chart.data.datasets[0].data = values.map(v => parseFloat(v));
+      chart.data.datasets[0].data = values.map(v => v===null?null:parseFloat(v));
       chart.update();
     }
 
