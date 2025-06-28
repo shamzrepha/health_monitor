@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Patient History Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body { font-family: 'Montserrat', Arial, sans-serif; background: #f9fbfd; margin:0; }
+    header { background: #45b1e7; color: #fff; text-align: center; padding: 2rem 0; }
+    .controls { text-align:center; margin:2em 0 1em 0;}
+    .controls select, .controls input { font-size:1.05em; padding:0.3em 0.7em; margin:0 0.3em; border-radius:6px; border:1px solid #c7e3f6;}
+    .dashboard { max-width:950px; margin: 0 auto; background:#fff; border-radius:15px; box-shadow:0 2px 12px #b2e1fa; padding:2em;}
+    .chart-card { margin:2em 0; }
+    .chart-title { text-align:center; margin-bottom:8px; color:#3592bb; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Patient History Dashboard</h1>
+    <p>View historical readings from Google Sheets</p>
+  </header>
+  <div class="controls">
+    <label>View: 
+      <select id="viewType">
+        <option value="day">Day (Hourly Avg.)</option>
+        <option value="week">Week (Daily Avg.)</option>
+        <option value="month">Month (Daily Avg.)</option>
+        <option value="all">All (Daily Avg.)</option>
+      </select>
+    </label>
+    <input type="date" id="dayPicker" style="display:inline-block;">
+    <input type="date" id="weekStartPicker" style="display:none;">
+    <input type="month" id="monthPicker" style="display:none;">
+    <button onclick="loadData()">View</button>
+  </div>
+  <div class="dashboard">
+    <div class="chart-card">
+      <div class="chart-title">Temperature (°C)</div>
+      <canvas id="chartTemp"></canvas>
+    </div>
+    <div class="chart-card">
+      <div class="chart-title">Heart Rate (BPM)</div>
+      <canvas id="chartBPM"></canvas>
+    </div>
+    <div class="chart-card">
+      <div class="chart-title">sCO₂ (%)</div>
+      <canvas id="chartCO2"></canvas>
+    </div>
+  </div>
+  <script>
+    // ==== Replace this with your Apps Script Web App URL ====
+    const API_URL = 'YOUR_SCRIPT_URL';
+    // ========================================================
+
+    let chartTemp = new Chart(document.getElementById('chartTemp'), {
+      type: 'line', data: {labels:[], datasets:[{label:'Temperature',data:[],backgroundColor:'#fbbc05',borderColor:'#fbbc05',fill:false}]},
+      options: {scales: {y: {suggestedMin: 20, suggestedMax: 45}}, animation: false }
+    });
+    let chartBPM = new Chart(document.getElementById('chartBPM'), {
+      type: 'line', data: {labels:[], datasets:[{label:'BPM',data:[],backgroundColor:'#45b1e7',borderColor:'#45b1e7',fill:false}]},
+      options: {scales: {y: {suggestedMin: 50, suggestedMax: 150}}, animation: false }
+    });
+    let chartCO2 = new Chart(document.getElementById('chartCO2'), {
+      type: 'line', data: {labels:[], datasets:[{label:'sCO₂',data:[],backgroundColor:'#4caf50',borderColor:'#4caf50',fill:false}]},
+      options: {scales: {y: {suggestedMin: 60, suggestedMax: 100}}, animation: false }
+    });
+
+    const viewType = document.getElementById('viewType');
+    const dayPicker = document.getElementById('dayPicker');
+    const weekStartPicker = document.getElementById('weekStartPicker');
+    const monthPicker = document.getElementById('monthPicker');
+    function updatePickers() {
+      dayPicker.style.display         = viewType.value==='day' ? 'inline-block' : 'none';
+      weekStartPicker.style.display   = viewType.value==='week' ? 'inline-block' : 'none';
+      monthPicker.style.display       = viewType.value==='month' ? 'inline-block' : 'none';
+    }
+    viewType.addEventListener('change', updatePickers);
+
+    async function loadData() {
+      let url = API_URL;
+      let mode = viewType.value;
+      if (mode === 'day') {
+        if (!dayPicker.value) { alert('Pick a day'); return; }
+        url += '?date=' + dayPicker.value;
+      } else if (mode === 'week') {
+        if (!weekStartPicker.value) { alert('Pick week start date (Monday)'); return; }
+        url += '?weekstart=' + weekStartPicker.value;
+      } else if (mode === 'month') {
+        if (!monthPicker.value) { alert('Pick a month'); return; }
+        url += '?month=' + monthPicker.value;
+      } else if (mode === 'all') {
+        url += '?all=1';
+      }
+
+      const res = await fetch(url);
+      const records = await res.json();
+      if (!records.length) {
+        chartTemp.data.labels = chartBPM.data.labels = chartCO2.data.labels = [];
+        chartTemp.data.datasets[0].data = chartBPM.data.datasets[0].data = chartCO2.data.datasets[0].data = [];
+        chartTemp.update(); chartBPM.update(); chartCO2.update();
+        alert('No data for selected period.');
+        return;
+      }
+
+      let labels=[], temps=[], bpms=[], co2s=[];
+      if (mode === 'day') {
+        let hourly = Array.from({length:24}, ()=>[]);
+        records.forEach(r=>{
+          let h = new Date(r.timestamp).getHours();
+          hourly[h].push(r);
+        });
+        labels = Array.from({length:24},(_,i)=>`${i}:00`);
+        temps = hourly.map(arr=>arr.length?avg(arr.map(r=>Number(r.temp))):null);
+        bpms  = hourly.map(arr=>arr.length?avg(arr.map(r=>Number(r.bpm))):null);
+        co2s  = hourly.map(arr=>arr.length?avg(arr.map(r=>Number(r.sco2))):null);
+      } else if (mode === 'week') {
+        let start = new Date(weekStartPicker.value);
+        let days = Array.from({length:7}, ()=>[]);
+        records.forEach(r=>{
+          let d = new Date(r.timestamp);
+          let offset = Math.floor((d - start)/86400000);
+          if (offset>=0 && offset<7) days[offset].push(r);
+        });
+        labels = Array.from({length:7},(_,i)=>{
+          let d = new Date(start.getTime() + i*86400000);
+          return d.toLocaleDateString(undefined, {weekday:'short', month:'short', day:'numeric'});
+        });
+        temps = days.map(arr=>arr.length?avg(arr.map(r=>Number(r.temp))):null);
+        bpms  = days.map(arr=>arr.length?avg(arr.map(r=>Number(r.bpm))):null);
+        co2s  = days.map(arr=>arr.length?avg(arr.map(r=>Number(r.sco2))):null);
+      } else { // 'month' or 'all'
+        let days = {};
+        records.forEach(r=>{
+          let d = new Date(r.timestamp).getDate();
+          if (!days[d]) days[d]=[]; days[d].push(r);
+        });
+        let maxDay = Math.max(...Object.keys(days).map(Number));
+        labels = Array.from({length:maxDay},(_,i)=>(i+1).toString());
+        temps = labels.map(d=>days[d]?avg(days[d].map(r=>Number(r.temp))):null);
+        bpms  = labels.map(d=>days[d]?avg(days[d].map(r=>Number(r.bpm))):null);
+        co2s  = labels.map(d=>days[d]?avg(days[d].map(r=>Number(r.sco2))):null);
+      }
+      chartTemp.data.labels = chartBPM.data.labels = chartCO2.data.labels = labels;
+      chartTemp.data.datasets[0].data = temps;
+      chartBPM.data.datasets[0].data = bpms;
+      chartCO2.data.datasets[0].data = co2s;
+      chartTemp.update(); chartBPM.update(); chartCO2.update();
+    }
+    function avg(arr) { return (arr.reduce((a,b)=>a+b,0)/arr.length).toFixed(1); }
+
+    window.onload = ()=>{
+      updatePickers();
+      loadData();
+    };
+  </script>
+</body>
+</html>
