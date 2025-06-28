@@ -3,219 +3,86 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Patient Health Dashboard</title>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <title>Live Patient Reading</title>
   <style>
-    body { font-family: 'Montserrat', Arial, sans-serif; background: #f9fbfd; margin:0; }
-    header { background: #45b1e7; color: #fff; text-align: center; padding: 2rem 0; }
-    .live-section {
-      max-width: 900px; margin: -42px auto 0 auto; display: flex; justify-content: center; gap: 32px;
-      background: #fff; border-radius: 18px; box-shadow: 0 2px 12px #b2e1fa; padding: 2em 1.5em 1em 1.5em;
-      position: relative; z-index: 2;
+    body { font-family: Arial, sans-serif; background: #f9fbfd; margin:0; }
+    .container {
+      max-width: 400px; margin: 3em auto;
+      background: #fff; border-radius: 14px; box-shadow: 0 2px 12px #b2e1fa;
+      padding: 2em 1.5em; text-align: center;
     }
-    .live-card {
-      min-width: 180px; text-align: center;
-      border-radius: 14px; background: #f8fcff; box-shadow: 0 1.5px 8px #d3eefa;
-      padding: 1.1em 1em 0.8em 1em; margin-bottom: 0.5em;
-    }
-    .live-label { font-size: 1.1em; color: #3592bb; margin-bottom: 0.4em; }
-    .live-value { font-size: 2.2em; font-weight: bold; margin-bottom: 0.2em; color: #fbbc05; }
-    .live-icon { font-size: 2.2em; color: #45b1e7; margin-bottom: 0.1em; }
-    .controls { text-align:center; margin:2.5em 0 1em 0;}
-    .controls select, .controls input { font-size:1.05em; padding:0.3em 0.7em; margin:0 0.3em; border-radius:6px; border:1px solid #c7e3f6;}
-    .dashboard { max-width:950px; margin: 0 auto; background:#fff; border-radius:15px; box-shadow:0 2px 12px #b2e1fa; padding:2em 1.5em;}
-    .chart-card { margin:2em 0; }
-    .chart-title { text-align:center; margin-bottom:8px; color:#3592bb; }
+    .label { font-size: 1.1em; color: #3592bb; margin-top: 1em; }
+    .value { font-size: 2.2em; font-weight: bold; color: #fbbc05; }
+    .icon  { font-size: 2em; color: #45b1e7; }
+    .status { margin-top:1em; font-size: 1em; color: #888;}
   </style>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 </head>
 <body>
-  <header>
-    <h1>Patient Health Dashboard</h1>
-    <p>Live readings and history from Google Sheets (auto-refreshing)</p>
-  </header>
-  <div class="live-section">
-    <div class="live-card">
-      <div class="live-label">Temperature</div>
-      <div class="live-value" id="live-temp">--</div>
-      <div class="live-icon">🌡️ °C</div>
-    </div>
-    <div class="live-card">
-      <div class="live-label">Heart Rate</div>
-      <div class="live-value" id="live-bpm">--</div>
-      <div class="live-icon">❤️ BPM</div>
-    </div>
-    <div class="live-card">
-      <div class="live-label">sCO₂</div>
-      <div class="live-value" id="live-co2">--</div>
-      <div class="live-icon">🫁 %</div>
-    </div>
-  </div>
-  <div class="controls">
-    <label>View: 
-      <select id="viewType">
-        <option value="1min">Last 1 Minute (12 Readings)</option>
-        <option value="day">Day (Hourly Avg.)</option>
-        <option value="week">Week (Daily Avg.)</option>
-        <option value="month">Month (Daily Avg.)</option>
-      </select>
-    </label>
-    <input type="date" id="dayPicker" style="display:none;">
-    <input type="date" id="weekStartPicker" style="display:none;">
-    <input type="month" id="monthPicker" style="display:none;">
-    <button onclick="loadData()">View</button>
-  </div>
-  <div class="dashboard">
-    <div class="chart-card">
-      <div class="chart-title">Temperature (°C)</div>
-      <canvas id="chartTemp"></canvas>
-    </div>
-    <div class="chart-card">
-      <div class="chart-title">Heart Rate (BPM)</div>
-      <canvas id="chartBPM"></canvas>
-    </div>
-    <div class="chart-card">
-      <div class="chart-title">sCO₂ (%)</div>
-      <canvas id="chartCO2"></canvas>
-    </div>
+  <div class="container">
+    <h2>Live Patient Reading</h2>
+    <div class="label">Temperature</div>
+    <div class="value" id="live-temp">--</div>
+    <div class="icon">🌡️ °C</div>
+    <div class="label">Heart Rate</div>
+    <div class="value" id="live-bpm">--</div>
+    <div class="icon">❤️ BPM</div>
+    <div class="label">sCO₂</div>
+    <div class="value" id="live-co2">--</div>
+    <div class="icon">🫁 %</div>
+    <div class="status" id="status">Connecting to Firebase...</div>
   </div>
   <script>
-    // Your Apps Script Web App URL:
-    const API_URL = 'https://script.google.com/macros/s/AKfycbwpGtWauddjPJ3rFrdWCZe1bXHxCVp5Z27USRGw-e7XSSfG4q4PRrPF6AWWMT076zA/exec';
-
-    // Chart.js setup
-    let chartTemp = new Chart(document.getElementById('chartTemp'), {
-      type: 'line', data: {labels:[], datasets:[{label:'Temperature',data:[],backgroundColor:'#fbbc05',borderColor:'#fbbc05',fill:false}]},
-      options: {scales: {y: {suggestedMin: 20, suggestedMax: 45}}, animation: false }
-    });
-    let chartBPM = new Chart(document.getElementById('chartBPM'), {
-      type: 'line', data: {labels:[], datasets:[{label:'BPM',data:[],backgroundColor:'#45b1e7',borderColor:'#45b1e7',fill:false}]},
-      options: {scales: {y: {suggestedMin: 50, suggestedMax: 150}}, animation: false }
-    });
-    let chartCO2 = new Chart(document.getElementById('chartCO2'), {
-      type: 'line', data: {labels:[], datasets:[{label:'sCO₂',data:[],backgroundColor:'#4caf50',borderColor:'#4caf50',fill:false}]},
-      options: {scales: {y: {suggestedMin: 60, suggestedMax: 100}}, animation: false }
-    });
-
-    // Controls for date/month pickers
-    const viewType = document.getElementById('viewType');
-    const dayPicker = document.getElementById('dayPicker');
-    const weekStartPicker = document.getElementById('weekStartPicker');
-    const monthPicker = document.getElementById('monthPicker');
-    viewType.addEventListener('change', ()=>{
-      dayPicker.style.display         = viewType.value==='day' ? 'inline-block' : 'none';
-      weekStartPicker.style.display   = viewType.value==='week' ? 'inline-block' : 'none';
-      monthPicker.style.display       = viewType.value==='month' ? 'inline-block' : 'none';
-    });
-
-    // Display latest reading instantly
-    async function updateLiveReading() {
-      try {
-        const res = await fetch(API_URL + '?last=1');
-        const arr = await res.json();
-        if (arr.length) {
-          const latest = arr[0];
-          document.getElementById('live-temp').textContent = latest.temp + ' °C';
-          document.getElementById('live-bpm').textContent  = latest.bpm;
-          document.getElementById('live-co2').textContent  = latest.sco2 + ' %';
-        }
-      } catch (e) {
-        document.getElementById('live-temp').textContent = '--';
-        document.getElementById('live-bpm').textContent  = '--';
-        document.getElementById('live-co2').textContent  = '--';
-      }
-    }
-
-    // Main loadData function
-    async function loadData() {
-      let url = API_URL;
-      let mode = viewType.value;
-      if (mode === '1min') {
-        url += '?last=12';
-      } else if (mode === 'day') {
-        if (!dayPicker.value) { alert('Pick a day'); return; }
-        url += '?date=' + dayPicker.value;
-      } else if (mode === 'week') {
-        if (!weekStartPicker.value) { alert('Pick week start date (Monday)'); return; }
-        url += '?weekstart=' + weekStartPicker.value;
-      } else if (mode === 'month') {
-        if (!monthPicker.value) { alert('Pick a month'); return; }
-        url += '?month=' + monthPicker.value;
-      }
-
-      const res = await fetch(url);
-      const records = await res.json();
-      if (!records.length) {
-        chartTemp.data.labels = chartBPM.data.labels = chartCO2.data.labels = [];
-        chartTemp.data.datasets[0].data = chartBPM.data.datasets[0].data = chartCO2.data.datasets[0].data = [];
-        chartTemp.update(); chartBPM.update(); chartCO2.update();
-        return;
-      }
-
-      let labels=[], temps=[], bpms=[], co2s=[];
-      if (mode === '1min') {
-        labels = records.map(r=>{
-          let d = new Date(r.timestamp);
-          return d.toLocaleTimeString();
-        });
-        temps = records.map(r=>Number(r.temp));
-        bpms  = records.map(r=>Number(r.bpm));
-        co2s  = records.map(r=>Number(r.sco2));
-      } else if (mode === 'day') {
-        let hourly = Array.from({length:24}, ()=>[]);
-        records.forEach(r=>{
-          let h = new Date(r.timestamp).getHours();
-          hourly[h].push(r);
-        });
-        labels = Array.from({length:24},(_,i)=>`${i}:00`);
-        temps = hourly.map(arr=>arr.length?avg(arr.map(r=>Number(r.temp))):null);
-        bpms  = hourly.map(arr=>arr.length?avg(arr.map(r=>Number(r.bpm))):null);
-        co2s  = hourly.map(arr=>arr.length?avg(arr.map(r=>Number(r.sco2))):null);
-      } else if (mode === 'week') {
-        let start = new Date(weekStartPicker.value);
-        let days = Array.from({length:7}, ()=>[]);
-        records.forEach(r=>{
-          let d = new Date(r.timestamp);
-          let offset = Math.floor((d - start)/86400000);
-          if (offset>=0 && offset<7) days[offset].push(r);
-        });
-        labels = Array.from({length:7},(_,i)=>{
-          let d = new Date(start.getTime() + i*86400000);
-          return d.toLocaleDateString(undefined, {weekday:'short', month:'short', day:'numeric'});
-        });
-        temps = days.map(arr=>arr.length?avg(arr.map(r=>Number(r.temp))):null);
-        bpms  = days.map(arr=>arr.length?avg(arr.map(r=>Number(r.bpm))):null);
-        co2s  = days.map(arr=>arr.length?avg(arr.map(r=>Number(r.sco2))):null);
-      } else if (mode === 'month') {
-        let days = {};
-        records.forEach(r=>{
-          let d = new Date(r.timestamp).getDate();
-          if (!days[d]) days[d]=[]; days[d].push(r);
-        });
-        let maxDay = Math.max(...Object.keys(days).map(Number));
-        labels = Array.from({length:maxDay},(_,i)=>(i+1).toString());
-        temps = labels.map(d=>days[d]?avg(days[d].map(r=>Number(r.temp))):null);
-        bpms  = labels.map(d=>days[d]?avg(days[d].map(r=>Number(r.bpm))):null);
-        co2s  = labels.map(d=>days[d]?avg(days[d].map(r=>Number(r.sco2))):null);
-      }
-      chartTemp.data.labels = chartBPM.data.labels = chartCO2.data.labels = labels;
-      chartTemp.data.datasets[0].data = temps;
-      chartBPM.data.datasets[0].data = bpms;
-      chartCO2.data.datasets[0].data = co2s;
-      chartTemp.update(); chartBPM.update(); chartCO2.update();
-    }
-    function avg(arr) { return (arr.reduce((a,b)=>a+b,0)/arr.length).toFixed(1); }
-
-    // Live update for instant reading and 1min graph
-    setInterval(()=>{
-      updateLiveReading();
-      if (viewType.value === '1min') loadData();
-    }, 5000);
-
-    window.onload = ()=>{
-      viewType.value = '1min';
-      updateLiveReading();
-      loadData();
+    // 1. Your Firebase config
+    const firebaseConfig = {
+      // Fill in with your Firebase config
+      apiKey: "YOUR_API_KEY",
+      authDomain: "YOUR_AUTH_DOMAIN",
+      databaseURL: "YOUR_DATABASE_URL",
+      projectId: "YOUR_PROJECT_ID",
+      storageBucket: "YOUR_STORAGE_BUCKET",
+      messagingSenderId: "YOUR_SENDER_ID",
+      appId: "YOUR_APP_ID"
     };
+    // 2. Your Apps Script Web App URL
+    const SCRIPT_URL = 'YOUR_SCRIPT_URL';
+
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+    const readingsPath = "patients/latest"; // Adjust this path as needed
+
+    let lastSentTimestamp = null;
+    document.getElementById('status').textContent = "Waiting for data...";
+
+    db.ref(readingsPath).on('value', snapshot => {
+      const data = snapshot.val();
+      if (!data) return;
+      document.getElementById('live-temp').textContent = data.temp + " °C";
+      document.getElementById('live-bpm').textContent = data.bpm;
+      document.getElementById('live-co2').textContent = data.sco2 + " %";
+      document.getElementById('status').textContent = "Live data from Firebase";
+
+      // Send to Google Sheets only if new
+      if (lastSentTimestamp === data.timestamp) return;
+      lastSentTimestamp = data.timestamp;
+
+      fetch(SCRIPT_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          temp: data.temp,
+          bpm: data.bpm,
+          sco2: data.sco2,
+          sos: data.sos || false,
+          sos_ack: data.sos_ack || false
+        })
+      }).then(() => {
+        document.getElementById('status').textContent = "Stored to Sheets & displaying live";
+      }).catch(() => {
+        document.getElementById('status').textContent = "Error storing to Sheets!";
+      });
+    });
   </script>
 </body>
 </html>
