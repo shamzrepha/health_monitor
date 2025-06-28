@@ -483,7 +483,6 @@
           const d = child.val();
           items.push(d);
         });
-        // Sort by timestamp ascending
         items.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
         const labels = [];
         const temp = [];
@@ -491,7 +490,7 @@
         const sco2 = [];
         items.forEach(d => {
           let label = d.iso_time
-            ? d.iso_time.split("T")[1].slice(0,8) // HH:MM:SS
+            ? d.iso_time.split("T")[1].slice(0,8)
             : (d.timestamp ? new Date(Number(d.timestamp)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : "–");
           labels.push(label);
           temp.push(Number(d.temp) || null);
@@ -503,96 +502,66 @@
     }
     fetchAndRenderLiveChart();
 
-    // ----------- History Chart (date picker, 24-hour average) + Table -----------
-    let historyChart = null;
+    // ----------- History Chart (date picker, 24-hour average) + Table (robust) -----------
 
-    function renderHistoryChart(labels, tempAvg, bpmAvg, sco2Avg) {
-      const ctx = document.getElementById('historyChart').getContext('2d');
-      if (historyChart) historyChart.destroy();
-      historyChart = new Chart(ctx, {
-        type: 'line',
-        data: {
-          labels,
-          datasets: [
-            {
-              label: 'Avg Temp (°C)',
-              data: tempAvg,
-              borderColor: '#fbbc05',
-              backgroundColor: 'rgba(251,188,5,0.10)',
-              yAxisID: 'y1',
-              tension: 0.32,
-              pointRadius: 3,
-              borderWidth: 2,
-            },
-            {
-              label: 'Avg Heart Rate (BPM)',
-              data: bpmAvg,
-              borderColor: '#45b1e7',
-              backgroundColor: 'rgba(69,177,231,0.10)',
-              yAxisID: 'y2',
-              tension: 0.32,
-              pointRadius: 3,
-              borderWidth: 2,
-            },
-            {
-              label: 'Avg sCO₂ (%)',
-              data: sco2Avg,
-              borderColor: '#4caf50',
-              backgroundColor: 'rgba(76,175,80,0.10)',
-              yAxisID: 'y3',
-              tension: 0.32,
-              pointRadius: 3,
-              borderWidth: 2,
-            }
-          ]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          scales: {
-            x: {
-              title: { display: false },
-              grid: { color: "#f4f4f4" }
-            },
-            y1: {
-              type: 'linear',
-              display: true,
-              position: 'left',
-              title: { display: true, text: "°C" },
-              grid: { color: "#f8e6c3" }
-            },
-            y2: {
-              type: 'linear',
-              display: true,
-              position: 'right',
-              title: { display: true, text: "BPM" },
-              grid: { drawOnChartArea: false }
-            },
-            y3: {
-              type: 'linear',
-              display: false,
-              position: 'right',
-              title: { display: true, text: "%" }
-            }
-          },
-          plugins: {
-            legend: { display: true, position: 'top' },
-            tooltip: { mode: 'index', intersect: false },
-            zoom: {
-              pan: { enabled: true, mode: 'x', modifierKey: 'ctrl' },
-              zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' }
-            }
-          }
+    function fetchHistoryForDate(dateStr) {
+      if (!dateStr) return;
+      // Calculate Nigerian day range in UTC ms
+      const start = new Date(dateStr + "T00:00:00+01:00").getTime();
+      const end = new Date(dateStr + "T23:59:59.999+01:00").getTime();
+
+      db.ref('readings').orderByChild('timestamp').startAt(start).endAt(end).once('value', snap => {
+        let readings = [];
+        snap.forEach(child => {
+          const d = child.val();
+          if (d.timestamp && d.timestamp >= start && d.timestamp <= end) readings.push(d);
+        });
+        // Fallback: if not enough, fetch all and filter in JS
+        if (readings.length < 10) {
+          db.ref('readings').once('value', snap2 => {
+            let allReadings = [];
+            snap2.forEach(child => {
+              const d = child.val();
+              if (d.timestamp && d.timestamp >= start && d.timestamp <= end) allReadings.push(d);
+            });
+            updateHistoryTableAndChart(allReadings, dateStr);
+          });
+        } else {
+          updateHistoryTableAndChart(readings, dateStr);
         }
       });
     }
 
-    // Compute 24 hourly average for a day's readings
+    function updateHistoryTableAndChart(readings, dateStr) {
+      readings.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+      renderHistoryTable(readings.slice(0, 50));
+      // Chart: 24 hourly averages
+      const {hourLabels, tempAvg, bpmAvg, sco2Avg} = computeHourlyAverages(readings);
+      renderHistoryChart(hourLabels, tempAvg, bpmAvg, sco2Avg);
+    }
+
+    function renderHistoryTable(readings) {
+      const tbody = document.querySelector("#historyTable tbody");
+      tbody.innerHTML = "";
+      readings.forEach(r => {
+        const ts = r.iso_time
+          ? r.iso_time.replace("T", " ").replace("+01:00","")
+          : (r.timestamp ? new Date(Number(r.timestamp)).toLocaleString() : "–");
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${ts}</td>
+          <td>${r.temp !== undefined ? r.temp : "--"}</td>
+          <td>${r.bpm !== undefined ? r.bpm : "--"}</td>
+          <td>${r.sco2 !== undefined ? r.sco2 : "--"}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
     function computeHourlyAverages(readings) {
       const hourly = Array.from({length: 24}, () => []);
       readings.forEach(r => {
         if (!r.timestamp) return;
-        // Nigerian time, so parse iso_time if available
         let hour = null;
         if (r.iso_time) {
           hour = Number(r.iso_time.substr(11,2));
@@ -620,44 +589,6 @@
       const hourLabels = [];
       for (let i=0; i<24; i++) hourLabels.push(i.toString().padStart(2,'0')+":00");
       return {hourLabels, tempAvg, bpmAvg, sco2Avg};
-    }
-
-    // Fetch all readings for a selected date (Nigerian time)
-    function fetchHistoryForDate(dateStr) {
-      if (!dateStr) return;
-      // Calculate Nigerian day range in UTC ms
-      const start = new Date(dateStr + "T00:00:00+01:00").getTime();
-      const end = new Date(dateStr + "T23:59:59.999+01:00").getTime();
-      db.ref('readings').orderByChild('timestamp').startAt(start).endAt(end).once('value', snap => {
-        const readings = [];
-        snap.forEach(child => {
-          const d = child.val();
-          if (d.timestamp) readings.push(d);
-        });
-        // Sort readings by timestamp descending for table
-        readings.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-        renderHistoryTable(readings.slice(0, 50));
-        // Chart: 24 hourly averages
-        const {hourLabels, tempAvg, bpmAvg, sco2Avg} = computeHourlyAverages(readings);
-        renderHistoryChart(hourLabels, tempAvg, bpmAvg, sco2Avg);
-      });
-    }
-
-    // Render history table of last 50 readings for selected date
-    function renderHistoryTable(readings) {
-      const tbody = document.querySelector("#historyTable tbody");
-      tbody.innerHTML = "";
-      readings.forEach(r => {
-        const tr = document.createElement('tr');
-        const ts = r.iso_time ? r.iso_time.replace("T", " ").replace("+01:00","") : (r.timestamp ? new Date(Number(r.timestamp)).toLocaleString() : "–");
-        tr.innerHTML = `
-          <td>${ts}</td>
-          <td>${r.temp !== undefined ? r.temp : "--"}</td>
-          <td>${r.bpm !== undefined ? r.bpm : "--"}</td>
-          <td>${r.sco2 !== undefined ? r.sco2 : "--"}</td>
-        `;
-        tbody.appendChild(tr);
-      });
     }
 
     // Date picker: default to today
