@@ -7,6 +7,7 @@
   <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-database-compat.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.umd.min.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700&display=swap" rel="stylesheet">
   <style>
     :root {
@@ -97,7 +98,7 @@
       background: var(--card-bg);
       border-radius: var(--border-radius);
       box-shadow: var(--shadow);
-      padding: 32px 28px 24px 28px;
+      padding: 32px 10px 24px 10px;
       margin: 0 auto 44px auto;
       max-width: 900px;
       margin-bottom: 40px;
@@ -110,9 +111,14 @@
       color: var(--primary-dark);
       text-align: center;
     }
+    .chart-container {
+      width: 100%;
+      overflow-x: auto;
+    }
     #liveChart, #historyChart {
-      width: 100% !important;
-      max-width: 850px;
+      min-width: 600px;
+      width: 100%;
+      max-width: 1800px;
       height: 320px !important;
       display: block;
       margin: 0 auto;
@@ -228,6 +234,19 @@
     }
     .footer a { color: var(--primary-dark); text-decoration: none; font-weight: bold; }
     ::selection { background: #b6e6ff; }
+    @media (max-width: 700px) {
+      .dashboard, .graph-section, .history-section, .history-table-section {
+        padding-left: 2vw;
+        padding-right: 2vw;
+      }
+      .live-section {
+        gap: 12px;
+      }
+      #liveChart, #historyChart {
+        min-width: 500px;
+        height: 200px !important;
+      }
+    }
   </style>
 </head>
 <body>
@@ -260,7 +279,9 @@
     </section>
     <section class="graph-section">
       <h2>Live Vitals (Last 60 Seconds)</h2>
-      <canvas id="liveChart"></canvas>
+      <div class="chart-container">
+        <canvas id="liveChart"></canvas>
+      </div>
     </section>
     <section class="history-section">
       <h2>History (Hourly Averages)</h2>
@@ -268,7 +289,9 @@
         <label for="history-date">Pick a date:</label>
         <input type="date" id="history-date"/>
       </div>
-      <canvas id="historyChart"></canvas>
+      <div class="chart-container">
+        <canvas id="historyChart"></canvas>
+      </div>
     </section>
     <section class="history-table-section">
       <h3>Last 50 Readings (Selected Date)</h3>
@@ -343,8 +366,6 @@
       document.getElementById('live-bpm').textContent = lastData.bpm ? lastData.bpm : "--";
       document.getElementById('live-co2').textContent = (lastData.sco2 ? lastData.sco2 : "--") + " %";
       sosKey = lastKey;
-
-      // SOS logic: Once triggered, keep showing and ringing until ack, regardless of new readings!
       if (lastData.sos === true && lastData.sos_ack !== true) {
         if (!sosActive) {
           sosActive = true;
@@ -443,7 +464,11 @@
           },
           plugins: {
             legend: { display: true, position: 'top' },
-            tooltip: { mode: 'index', intersect: false }
+            tooltip: { mode: 'index', intersect: false },
+            zoom: {
+              pan: { enabled: true, mode: 'x', modifierKey: 'ctrl' },
+              zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' }
+            }
           }
         }
       });
@@ -453,14 +478,20 @@
     function fetchAndRenderLiveChart() {
       db.ref('readings').orderByChild('timestamp').limitToLast(12).on('value', snap => {
         if (!snap.exists()) return;
+        const items = [];
+        snap.forEach(child => {
+          const d = child.val();
+          items.push(d);
+        });
+        // Sort by timestamp ascending
+        items.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
         const labels = [];
         const temp = [];
         const bpm = [];
         const sco2 = [];
-        snap.forEach(child => {
-          const d = child.val();
+        items.forEach(d => {
           let label = d.timestamp
-            ? new Date(d.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+            ? new Date(Number(d.timestamp)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
             : (d.time || "–");
           labels.push(label);
           temp.push(Number(d.temp) || null);
@@ -546,7 +577,11 @@
           },
           plugins: {
             legend: { display: true, position: 'top' },
-            tooltip: { mode: 'index', intersect: false }
+            tooltip: { mode: 'index', intersect: false },
+            zoom: {
+              pan: { enabled: true, mode: 'x', modifierKey: 'ctrl' },
+              zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' }
+            }
           }
         }
       });
@@ -554,11 +589,10 @@
 
     // Compute 24 hourly average for a day's readings
     function computeHourlyAverages(readings) {
-      // readings = array of {timestamp, temp, bpm, sco2}
       const hourly = Array.from({length: 24}, () => []);
       readings.forEach(r => {
         if (!r.timestamp) return;
-        const date = new Date(r.timestamp);
+        const date = new Date(Number(r.timestamp));
         const hour = date.getHours();
         hourly[hour].push(r);
       });
@@ -585,7 +619,6 @@
     // Fetch all readings for a selected date (UTC)
     function fetchHistoryForDate(dateStr) {
       if (!dateStr) return;
-      // dateStr: 'YYYY-MM-DD'
       const start = new Date(dateStr + "T00:00:00Z").getTime();
       const end = new Date(dateStr + "T23:59:59.999Z").getTime();
       db.ref('readings').orderByChild('timestamp').startAt(start).endAt(end).once('value', snap => {
@@ -594,8 +627,9 @@
           const d = child.val();
           if (d.timestamp) readings.push(d);
         });
-        // Table: last 50 readings (reverse chronological)
-        renderHistoryTable(readings.slice(-50).reverse());
+        // Sort readings by timestamp descending for table
+        readings.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+        renderHistoryTable(readings.slice(0, 50));
         // Chart: 24 hourly averages
         const {hourLabels, tempAvg, bpmAvg, sco2Avg} = computeHourlyAverages(readings);
         renderHistoryChart(hourLabels, tempAvg, bpmAvg, sco2Avg);
@@ -608,7 +642,7 @@
       tbody.innerHTML = "";
       readings.forEach(r => {
         const tr = document.createElement('tr');
-        const ts = r.timestamp ? new Date(r.timestamp).toLocaleString() : (r.time || "--");
+        const ts = r.timestamp ? new Date(Number(r.timestamp)).toLocaleString() : (r.time || "--");
         tr.innerHTML = `
           <td>${ts}</td>
           <td>${r.temp !== undefined ? r.temp : "--"}</td>
