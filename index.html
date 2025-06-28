@@ -2,50 +2,39 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>Live Patient Reading (Modular SDK)</title>
+  <title>Live Patient Reading</title>
   <script type="module">
-    // Import the functions from Firebase Modular SDK
     import { initializeApp } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-app.js";
-    import { getDatabase, ref, onValue } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-database.js";
+    import { getDatabase, ref, query, limitToLast, onChildAdded } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-database.js";
 
-    // Your Firebase config
     const firebaseConfig = {
-      apiKey: "AIzaSyDssbC1dIiDmACxzSs9Kn-vA-cRT3MLKzk",
-      authDomain: "healthmonitorapp-47655.firebaseapp.com",
-      databaseURL: "https://healthmonitorapp-47655-default-rtdb.firebaseio.com",
-      projectId: "healthmonitorapp-47655",
-      storageBucket: "healthmonitorapp-47655.appspot.com",
-      messagingSenderId: "831668449943",
-      appId: "1:831668449943:web:b9ae8fdd50de8fc4d2efd2",
-      measurementId: "G-BPCV50PSCF"
+      apiKey: "...",
+      authDomain: "...",
+      databaseURL: "...",
+      projectId: "...",
+      storageBucket: "...",
+      messagingSenderId: "...",
+      appId: "...",
+      measurementId: "..."
     };
-
-    // Initialize Firebase
     const app = initializeApp(firebaseConfig);
     const db = getDatabase(app);
 
-    // Listen for changes at a specific path (adjust as needed)
-    onValue(ref(db, "patients/latest"), (snapshot) => {
+    // Change this path to match your structure
+    const readingsRef = ref(db, "readings");
+    const latestQuery = query(readingsRef, limitToLast(1));
+
+    onChildAdded(latestQuery, (snapshot) => {
       const data = snapshot.val();
-      if (data) {
-        document.getElementById('live-temp').textContent = data.temp + " °C";
-        document.getElementById('live-bpm').textContent = data.bpm;
-        document.getElementById('live-co2').textContent = data.sco2 + " %";
-        document.getElementById('status').textContent = "Live data from Firebase";
-      } else {
-        document.getElementById('status').textContent = "No data at patients/latest.";
-      }
-    }, (error) => {
-      document.getElementById('status').textContent = "Firebase error: " + error.message;
+      document.getElementById('live-temp').textContent = data.temp + " °C";
+      document.getElementById('live-bpm').textContent = data.bpm;
+      document.getElementById('live-co2').textContent = data.sco2 + " %";
+      document.getElementById('status').textContent = "Live data from Firebase";
     });
   </script>
   <style>
     body { font-family: Arial, sans-serif; background: #f9fbfd; margin:0; }
-    .container {
-      max-width: 400px; margin: 3em auto;
-      background: #fff; border-radius: 14px; box-shadow: 0 2px 12px #b2e1fa;
-      padding: 2em 1.5em; text-align: center;
-    }
+    .container { max-width: 400px; margin: 3em auto; background: #fff; border-radius: 14px; box-shadow: 0 2px 12px #b2e1fa; padding: 2em 1.5em; text-align: center; }
     .label { font-size: 1.1em; color: #3592bb; margin-top: 1em; }
     .value { font-size: 2.2em; font-weight: bold; color: #fbbc05; }
     .icon  { font-size: 2em; color: #45b1e7; }
@@ -64,7 +53,7 @@
     <div class="label">sCO₂</div>
     <div class="value" id="live-co2">--</div>
     <div class="icon">🫁 %</div>
-    <div class="status" id="status">Connecting to Firebase...</div>
+    <div class="status" id="status">Waiting for data...</div>
   </div>
 </body>
 </html>
