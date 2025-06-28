@@ -4,7 +4,6 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Live Health Monitor</title>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-database-compat.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700&display=swap" rel="stylesheet">
@@ -93,68 +92,6 @@
       font-weight: 400;
       letter-spacing: 1px;
     }
-    .filter-bar {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 18px;
-      margin-bottom: 32px;
-      flex-wrap: wrap;
-    }
-    .filter-bar label {
-      font-size: 1.1rem;
-      color: var(--primary-dark);
-      font-weight: 600;
-    }
-    .filter-bar select, .filter-bar input[type="month"], .filter-bar input[type="date"] {
-      font-size: 1.1rem;
-      padding: 7px 16px;
-      border-radius: 8px;
-      border: 1px solid #c7e3f6;
-      background: #eaf7ff;
-      color: var(--primary-dark);
-      outline: none;
-      transition: border 0.2s;
-      font-family: inherit;
-    }
-    .filter-bar select:focus, .filter-bar input[type="month"]:focus, .filter-bar input[type="date"]:focus {
-      border: 1.5px solid var(--primary);
-    }
-    .chart-section {
-      display: grid;
-      grid-template-columns: 1fr;
-      gap: 28px;
-      max-width: 900px;
-      margin: 0 auto;
-    }
-    @media (min-width: 900px) {
-      .chart-section {
-        grid-template-columns: 1fr 1fr 1fr;
-      }
-    }
-    .chart-card {
-      background: var(--card-bg);
-      border-radius: var(--border-radius);
-      box-shadow: var(--shadow);
-      padding: 28px 18px 22px 18px;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      min-height: 320px;
-      position: relative;
-    }
-    .chart-card h3 {
-      margin: 0 0 14px 0;
-      color: var(--primary-dark);
-      font-size: 1.2rem;
-      letter-spacing: 1px;
-      font-weight: 600;
-    }
-    .chart-card canvas {
-      width: 100% !important;
-      max-width: 340px;
-      max-height: 180px;
-    }
     .sos-alert {
       position: fixed;
       top: 0; left: 0; width: 100%; height: 100%;
@@ -206,38 +143,6 @@
     }
     .footer a { color: var(--primary-dark); text-decoration: none; font-weight: bold; }
     ::selection { background: #b6e6ff; }
-    .history-table-section {
-      max-width: 900px;
-      margin: 24px auto 0 auto;
-      background: var(--card-bg);
-      border-radius: var(--border-radius);
-      box-shadow: var(--shadow);
-      padding: 14px 8px;
-      overflow-x: auto;
-    }
-    .history-table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 1rem;
-      color: #333;
-      margin: 0 auto;
-    }
-    .history-table th, .history-table td {
-      padding: 7px 13px;
-      border-bottom: 1px solid #eaf7ff;
-    }
-    .history-table th {
-      background: #eaf7ff;
-      color: var(--primary-dark);
-      font-weight: 600;
-      text-align: left;
-    }
-    .history-table tr:last-child td {
-      border-bottom: none;
-    }
-    .history-table tr:hover {
-      background: #f6fbff;
-    }
   </style>
 </head>
 <body>
@@ -268,51 +173,11 @@
         <span class="live-label">sCO₂ (%)</span>
       </div>
     </section>
-    <section class="filter-bar">
-      <label for="viewRange">View:</label>
-      <select id="viewRange">
-        <option value="1min">Live (1 Minute)</option>
-        <option value="day">Today</option>
-        <option value="week">Week</option>
-        <option value="month">Month</option>
-      </select>
-      <input type="month" id="monthPicker" style="display: none;">
-      <label for="historyDate" style="margin-left:12px;">Patient History:</label>
-      <input type="date" id="historyDate" max="9999-12-31">
-    </section>
-    <section class="chart-section">
-      <div class="chart-card">
-        <h3>Temperature (°C)</h3>
-        <canvas id="chartTemp"></canvas>
-      </div>
-      <div class="chart-card">
-        <h3>Heart Rate (BPM)</h3>
-        <canvas id="chartBPM"></canvas>
-      </div>
-      <div class="chart-card">
-        <h3>sCO₂ (%)</h3>
-        <canvas id="chartCO2"></canvas>
-      </div>
-    </section>
-    <section class="history-table-section" id="historyTableSection" style="display:none;">
-      <table class="history-table" id="historyTable">
-        <thead>
-          <tr>
-            <th>Time</th>
-            <th>Temperature (°C)</th>
-            <th>Heart Rate (BPM)</th>
-            <th>sCO₂ (%)</th>
-            <th>SOS</th>
-          </tr>
-        </thead>
-        <tbody id="historyTableBody">
-        </tbody>
-      </table>
-    </section>
   </main>
   <footer class="footer">
     Inspired by leading health apps. &copy; 2025 <a href="#">HealthMonitor</a>
   </footer>
+  <audio id="sos-audio" src="https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg" preload="auto"></audio>
   <script>
     // Firebase config
     const firebaseConfig = {
@@ -328,148 +193,43 @@
     firebase.initializeApp(firebaseConfig);
     const db = firebase.database();
 
-    function getBarColors(baseColor, highlightColor, len) {
-      if (len === 0) return [];
-      return Array.from({length: len-1}, () => baseColor).concat([highlightColor]);
-    }
-
-    const charts = {
-      temp: new Chart(document.getElementById('chartTemp'), {
-        type: 'bar',
-        data: { labels: [], datasets: [{ label: 'Temperature (°C)', data: [], backgroundColor: [] }] },
-        options: {
-          responsive: true,
-          animation: { duration: 700 },
-          plugins: {
-            legend: { display: false },
-            title: { display: false }
-          },
-          scales: {
-            x: {
-              grid: { color: "#f0f6fa" },
-              ticks: { color: "#8aa6be", font: { size: 13, weight: 600 } }
-            },
-            y: {
-              beginAtZero: true,
-              suggestedMin: 20,
-              suggestedMax: 45,
-              grid: { color: "#f0f6fa" },
-              ticks: { color: "#8aa6be", font: { size: 13, weight: 600 } }
-            }
-          }
-        }
-      }),
-      bpm: new Chart(document.getElementById('chartBPM'), {
-        type: 'bar',
-        data: { labels: [], datasets: [{ label: 'Heart Rate (BPM)', data: [], backgroundColor: [] }] },
-        options: {
-          responsive: true,
-          animation: { duration: 700 },
-          plugins: {
-            legend: { display: false },
-            title: { display: false }
-          },
-          scales: {
-            x: {
-              grid: { color: "#f0f6fa" },
-              ticks: { color: "#8aa6be", font: { size: 13, weight: 600 } }
-            },
-            y: {
-              beginAtZero: true,
-              suggestedMin: 50,
-              suggestedMax: 150,
-              grid: { color: "#f0f6fa" },
-              ticks: { color: "#8aa6be", font: { size: 13, weight: 600 } }
-            }
-          }
-        }
-      }),
-      co2: new Chart(document.getElementById('chartCO2'), {
-        type: 'bar',
-        data: { labels: [], datasets: [{ label: 'sCO₂ (%)', data: [], backgroundColor: [] }] },
-        options: {
-          responsive: true,
-          animation: { duration: 700 },
-          plugins: {
-            legend: { display: false },
-            title: { display: false }
-          },
-          scales: {
-            x: {
-              grid: { color: "#f0f6fa" },
-              ticks: { color: "#8aa6be", font: { size: 13, weight: 600 } }
-            },
-            y: {
-              beginAtZero: true,
-              suggestedMin: 60,
-              suggestedMax: 100,
-              grid: { color: "#f0f6fa" },
-              ticks: { color: "#8aa6be", font: { size: 13, weight: 600 } }
-            }
-          }
-        }
-      })
-    };
-
     let sosKey = null;
+    let sosActive = false;
+    let sosAudioInterval = null;
 
-    const viewSelect = document.getElementById('viewRange');
-    const monthPicker = document.getElementById('monthPicker');
-    const historyDate = document.getElementById('historyDate');
-    const historyTableSection = document.getElementById('historyTableSection');
-    const historyTableBody = document.getElementById('historyTableBody');
-
-    viewSelect.addEventListener('change', () => {
-      monthPicker.style.display = viewSelect.value === 'month' ? 'inline-block' : 'none';
-      if (historyDate.value) {
-        historyDate.value = "";
-        historyTableSection.style.display = "none";
-      }
-      loadData();
-    });
-    monthPicker.addEventListener('change', loadData);
-    historyDate.addEventListener('change', loadData);
-
-    function formatHour(hour) {
-      const h = hour % 12 || 12;
-      const ampm = hour < 12 ? "am" : "pm";
-      return `${h}${ampm}`;
+    // Play SOS audio in a loop
+    function playSosAudio() {
+      const audio = document.getElementById('sos-audio');
+      if (!audio) return;
+      audio.currentTime = 0;
+      audio.play();
+      // Restart audio after it ends to keep ringing
+      sosAudioInterval = setInterval(() => {
+        if (!sosActive) return;
+        audio.currentTime = 0;
+        audio.play();
+      }, 3000); // Alarm is ~2.5s, so this keeps it ringing
     }
 
-    function updateChart(chart, labels, values, color, highlight) {
-      chart.data.labels = labels;
-      chart.data.datasets[0].data = values.map(v => (v === null || v === undefined) ? 0 : parseFloat(v));
-      chart.data.datasets[0].backgroundColor = getBarColors(color, highlight, values.length);
-      chart.update();
-    }
-
-    function populateHistoryTable(readings) {
-      historyTableBody.innerHTML = "";
-      readings.forEach(data => {
-        const t = new Date(data.timestamp);
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-          <td>${t.toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", second: "2-digit"})}</td>
-          <td>${data.temp !== undefined ? data.temp : ''}</td>
-          <td>${data.bpm !== undefined ? data.bpm : ''}</td>
-          <td>${data.sco2 !== undefined ? data.sco2 : ''}</td>
-          <td>${data.sos === true ? '🚨' : ''}</td>
-        `;
-        historyTableBody.appendChild(tr);
-      });
-      historyTableSection.style.display = readings.length ? "block" : "none";
+    function stopSosAudio() {
+      const audio = document.getElementById('sos-audio');
+      if (!audio) return;
+      audio.pause();
+      audio.currentTime = 0;
+      if (sosAudioInterval) clearInterval(sosAudioInterval);
+      sosAudioInterval = null;
     }
 
     // Live value update and SOS
     db.ref('readings').limitToLast(1).on('value', snap => {
       if (!snap.exists()) return;
-      let lastData;
-      snap.forEach(child => { lastData = child.val(); });
+      let lastData, lastKey;
+      snap.forEach(child => { lastData = child.val(); lastKey = child.key; });
       if (!lastData) return;
       document.getElementById('live-temp').textContent = (lastData.temp ? lastData.temp : "--") + " °C";
       document.getElementById('live-bpm').textContent = lastData.bpm ? lastData.bpm : "--";
       document.getElementById('live-co2').textContent = (lastData.sco2 ? lastData.sco2 : "--") + " %";
-      sosKey = Object.keys(snap.val())[0];
+      sosKey = lastKey;
       if (lastData.sos === true && lastData.sos_ack !== true) {
         showSOS();
       } else {
@@ -479,15 +239,15 @@
 
     function showSOS() {
       document.getElementById('sosBanner').style.display = 'flex';
-      if (!window.sosAudioPlayed) {
-        const audio = new Audio('https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg');
-        audio.play();
-        window.sosAudioPlayed = true;
+      if (!sosActive) {
+        sosActive = true;
+        playSosAudio();
       }
     }
     function hideSOS() {
       document.getElementById('sosBanner').style.display = 'none';
-      window.sosAudioPlayed = false;
+      sosActive = false;
+      stopSosAudio();
     }
     window.ackSos = async function() {
       if (sosKey) {
@@ -495,176 +255,6 @@
         hideSOS();
       }
     };
-
-    db.ref('readings').on('value', function() { loadData(); });
-
-    async function loadData() {
-      const now = new Date();
-      const view = viewSelect.value;
-      const history = historyDate.value;
-
-      if (history) {
-        monthPicker.style.display = "none";
-        const [yyyy, mm, dd] = history.split('-').map(Number);
-        const start = new Date(yyyy, mm-1, dd, 0, 0, 0).getTime();
-        const end = new Date(yyyy, mm-1, dd, 23, 59, 59, 999).getTime();
-        const snap = await db.ref('readings').orderByChild('timestamp').startAt(start).endAt(end).get();
-        let readings = [];
-        if (snap.exists()) snap.forEach(child => readings.push(child.val()));
-        readings.sort((a, b) => a.timestamp - b.timestamp);
-        ["temp", "bpm", "co2"].forEach((key, idx) => {
-          const chart = charts[key];
-          if (chart.config.type !== 'line') {
-            chart.config.type = 'line';
-            chart.options.scales.x.type = "category";
-          }
-        });
-        const labels = readings.map(d => {
-          const t = new Date(d.timestamp);
-          return t.toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", second: "2-digit"});
-        });
-        const temps = readings.map(d => d.temp !== undefined ? parseFloat(d.temp) : 0);
-        const bpms = readings.map(d => d.bpm !== undefined ? parseFloat(d.bpm) : 0);
-        const co2s = readings.map(d => d.sco2 !== undefined ? parseFloat(d.sco2) : 0);
-        updateChart(charts.temp, labels, temps, "#fbbc05", "#e53935");
-        updateChart(charts.bpm, labels, bpms, "#45b1e7", "#1976d2");
-        updateChart(charts.co2, labels, co2s, "#4caf50", "#009688");
-        populateHistoryTable(readings);
-        return;
-      } else {
-        ["temp", "bpm", "co2"].forEach(key => {
-          const chart = charts[key];
-          if (chart.config.type !== 'bar') {
-            chart.config.type = 'bar';
-          }
-        });
-        historyTableSection.style.display = "none";
-      }
-
-      const snap = await db.ref('readings').orderByChild('timestamp').limitToLast(30).get();
-      let readings = [];
-      if (snap.exists()) snap.forEach(child => readings.push(child.val()));
-      if (readings.length === 0) {
-        updateChart(charts.temp, [], [], "#fbbc05", "#e53935");
-        updateChart(charts.bpm, [], [], "#45b1e7", "#1976d2");
-        updateChart(charts.co2, [], [], "#4caf50", "#009688");
-        return;
-      }
-
-      if (view === '1min') {
-        const nowTs = Date.now();
-        const slots = Array.from({length:12}, (_,i)=>nowTs - (11-i)*5000);
-        const barData = Array.from({length:12}, ()=>[]);
-        readings.forEach(data => {
-          const ts = typeof data.timestamp === "number" ? data.timestamp : new Date(data.timestamp).getTime();
-          for(let i=0;i<12;i++) {
-            if(ts >= slots[i] && ts < slots[i]+5000) {
-              barData[i].push(data);
-              break;
-            }
-          }
-        });
-        const labels = Array.from({length:12}, (_,i)=>`${(i-11)*5<0?-(i-11)*5:0}s ago`).reverse();
-        const temps = barData.map(arr=>arr.length?((arr.reduce((a,b)=>a+Number(b.temp),0))/arr.length).toFixed(1):0);
-        const bpms  = barData.map(arr=>arr.length?((arr.reduce((a,b)=>a+Number(b.bpm),0))/arr.length).toFixed(1):0);
-        const co2s  = barData.map(arr=>arr.length?((arr.reduce((a,b)=>a+Number(b.sco2),0))/arr.length).toFixed(1):0);
-        updateChart(charts.temp, labels, temps, "#fbbc05", "#e53935");
-        updateChart(charts.bpm, labels, bpms, "#45b1e7", "#1976d2");
-        updateChart(charts.co2, labels, co2s, "#4caf50", "#009688");
-        return;
-      }
-
-      if (view === "day") {
-        let bars = Array.from({length:24}, ()=>[]);
-        readings.forEach(data => {
-          const ts = new Date(data.timestamp);
-          if (ts.toDateString() !== now.toDateString()) return;
-          bars[ts.getHours()].push(data);
-        });
-        const labels = Array.from({length:24}, (_,i)=>formatHour(i));
-        const temps = bars.map(arr=>arr.length?((arr.reduce((a,b)=>a+Number(b.temp),0))/arr.length).toFixed(1):0);
-        const bpms  = bars.map(arr=>arr.length?((arr.reduce((a,b)=>a+Number(b.bpm),0))/arr.length).toFixed(1):0);
-        const co2s  = bars.map(arr=>arr.length?((arr.reduce((a,b)=>a+Number(b.sco2),0))/arr.length).toFixed(1):0);
-        updateChart(charts.temp, labels, temps, "#fbbc05", "#e53935");
-        updateChart(charts.bpm, labels, bpms, "#45b1e7", "#1976d2");
-        updateChart(charts.co2, labels, co2s, "#4caf50", "#009688");
-        return;
-      }
-
-      if (view==="week") {
-        let weekAgo = new Date(now);
-        weekAgo.setHours(0,0,0,0);
-        weekAgo.setDate(now.getDate()-6);
-        let days = Array.from({length:7}, ()=>[]);
-        readings.forEach(data => {
-          const ts = new Date(data.timestamp);
-          if (ts >= weekAgo && ts <= now) {
-            let dayIdx = Math.floor((ts-weekAgo)/(24*60*60*1000));
-            days[dayIdx].push(data);
-          }
-        });
-        let dayNames = [];
-        for(let i=0;i<7;i++) {
-          let d = new Date(weekAgo);
-          d.setDate(weekAgo.getDate()+i);
-          dayNames.push(d.toLocaleDateString(undefined, {weekday:"short"}));
-        }
-        const temps = days.map(arr=>arr.length?((arr.reduce((a,b)=>a+Number(b.temp),0))/arr.length).toFixed(1):0);
-        const bpms  = days.map(arr=>arr.length?((arr.reduce((a,b)=>a+Number(b.bpm),0))/arr.length).toFixed(1):0);
-        const co2s  = days.map(arr=>arr.length?((arr.reduce((a,b)=>a+Number(b.sco2),0))/arr.length).toFixed(1):0);
-        updateChart(charts.temp, dayNames, temps, "#fbbc05", "#e53935");
-        updateChart(charts.bpm, dayNames, bpms, "#45b1e7", "#1976d2");
-        updateChart(charts.co2, dayNames, co2s, "#4caf50", "#009688");
-        return;
-      }
-
-      if (view==="month") {
-        if (!monthPicker.value) {
-          updateChart(charts.temp, [], [], "#fbbc05", "#e53935");
-          updateChart(charts.bpm, [], [], "#45b1e7", "#1976d2");
-          updateChart(charts.co2, [], [], "#4caf50", "#009688");
-          return;
-        }
-        const [yyyy,mm]=monthPicker.value.split("-");
-        const selectedMonth = new Date(Number(yyyy), Number(mm)-1, 1);
-        let daysInMonth = new Date(Number(yyyy), Number(mm), 0).getDate();
-        let bars = Array.from({length:daysInMonth}, ()=>[]);
-        readings.forEach(data => {
-          const ts = new Date(data.timestamp);
-          if (ts.getMonth()!==selectedMonth.getMonth() || ts.getFullYear()!==selectedMonth.getFullYear()) return;
-          bars[ts.getDate()-1].push(data);
-        });
-        const labels = Array.from({length:daysInMonth}, (_,i)=>(i+1).toString());
-        const temps = bars.map(arr=>arr.length?((arr.reduce((a,b)=>a+Number(b.temp),0))/arr.length).toFixed(1):0);
-        const bpms  = bars.map(arr=>arr.length?((arr.reduce((a,b)=>a+Number(b.bpm),0))/arr.length).toFixed(1):0);
-        const co2s  = bars.map(arr=>arr.length?((arr.reduce((a,b)=>a+Number(b.sco2),0))/arr.length).toFixed(1):0);
-        updateChart(charts.temp, labels, temps, "#fbbc05", "#e53935");
-        updateChart(charts.bpm, labels, bpms, "#45b1e7", "#1976d2");
-        updateChart(charts.co2, labels, co2s, "#4caf50", "#009688");
-        return;
-      }
-
-      // fallback: last 30 readings as lines
-      ["temp", "bpm", "co2"].forEach((key, idx) => {
-        const chart = charts[key];
-        if (chart.config.type !== 'line') {
-          chart.config.type = 'line';
-          chart.options.scales.x.type = "category";
-        }
-      });
-      const labels = readings.map(d => {
-        const t = new Date(d.timestamp);
-        return t.toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", second: "2-digit"});
-      });
-      const temps = readings.map(d => d.temp !== undefined ? parseFloat(d.temp) : 0);
-      const bpms = readings.map(d => d.bpm !== undefined ? parseFloat(d.bpm) : 0);
-      const co2s = readings.map(d => d.sco2 !== undefined ? parseFloat(d.sco2) : 0);
-      updateChart(charts.temp, labels, temps, "#fbbc05", "#e53935");
-      updateChart(charts.bpm, labels, bpms, "#45b1e7", "#1976d2");
-      updateChart(charts.co2, labels, co2s, "#4caf50", "#009688");
-    }
-
-    loadData();
   </script>
 </body>
 </html>
