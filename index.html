@@ -3,14 +3,24 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Health Monitor Realtime</title>
+  <title>Live Health Monitor</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-database-compat.js"></script>
   <style>
-    body { font-family: Arial, sans-serif; background: #f0f4f8; padding: 20px; }
-    h1 { text-align: center; }
-    .filter { text-align: center; margin-bottom: 30px; }
+    body { font-family: Arial, sans-serif; background: #eef2f5; margin: 0; padding: 20px; }
+    h1 { text-align: center; margin-bottom: 20px; }
+    .live-data { text-align: center; margin-bottom: 30px; font-size: 1.5rem; }
+    .live-data span { display: inline-block; min-width: 180px; }
+    .filter {
+      text-align: center;
+      margin-bottom: 20px;
+    }
+    .filter select, .filter input {
+      font-size: 1rem;
+      margin: 0 10px;
+      padding: 5px 10px;
+    }
     .chart-container {
       max-width: 800px;
       margin: 0 auto 50px auto;
@@ -22,29 +32,24 @@
   </style>
 </head>
 <body>
-  <h1>Realtime Health Monitor Dashboard</h1>
+  <h1>Live Health Monitor</h1>
+
+  <div class="live-data">
+    <div><span id="live-temp">Temp: --</span> <span id="live-bpm">BPM: --</span> <span id="live-co2">sCO₂: --</span></div>
+  </div>
+
   <div class="filter">
-    <label for="timeRange">Time Range: </label>
-    <select id="timeRange">
-      <option value="1">Today</option>
-      <option value="7">Last 7 Days</option>
-      <option value="30">Last 30 Days</option>
+    <label for="viewRange">View: </label>
+    <select id="viewRange">
+      <option value="day">Today</option>
+      <option value="week">Week</option>
+      <option value="month">Month</option>
     </select>
+    <input type="month" id="monthPicker" style="display: none;">
   </div>
 
   <div class="chart-container">
-    <h3>Temperature (°C)</h3>
-    <canvas id="tempChart"></canvas>
-  </div>
-
-  <div class="chart-container">
-    <h3>Heart Rate (BPM)</h3>
-    <canvas id="bpmChart"></canvas>
-  </div>
-
-  <div class="chart-container">
-    <h3>sCO₂ (ppm)</h3>
-    <canvas id="co2Chart"></canvas>
+    <canvas id="chart"></canvas>
   </div>
 
   <script>
@@ -62,50 +67,107 @@
     firebase.initializeApp(firebaseConfig);
     const db = firebase.database();
 
-    const tempChart = createChart('tempChart', 'red');
-    const bpmChart = createChart('bpmChart', 'blue');
-    const co2Chart = createChart('co2Chart', 'green');
+    const chartCanvas = document.getElementById('chart');
+    const viewSelect = document.getElementById('viewRange');
+    const monthPicker = document.getElementById('monthPicker');
 
-    document.getElementById('timeRange').addEventListener('change', loadData);
+    const chart = new Chart(chartCanvas, {
+      type: 'line',
+      data: {
+        labels: [],
+        datasets: [
+          { label: 'Temp (°C)', data: [], borderColor: 'red', fill: false },
+          { label: 'BPM', data: [], borderColor: 'blue', fill: false },
+          { label: 'sCO₂ (ppm)', data: [], borderColor: 'green', fill: false }
+        ]
+      },
+      options: {
+        responsive: true,
+        scales: {
+          x: { title: { display: true, text: 'Time' } },
+          y: { beginAtZero: true }
+        }
+      }
+    });
+
+    viewSelect.addEventListener('change', () => {
+      monthPicker.style.display = viewSelect.value === 'month' ? 'inline-block' : 'none';
+      loadData();
+    });
+
+    monthPicker.addEventListener('change', loadData);
+
+    function updateLive(data) {
+      document.getElementById('live-temp').textContent = `Temp: ${data.temp}°C`;
+      document.getElementById('live-bpm').textContent = `BPM: ${data.bpm}`;
+      document.getElementById('live-co2').textContent = `sCO₂: ${data.sco2} ppm`;
+    }
+
+    function formatLabel(ts, view) {
+      const d = new Date(ts);
+      if (view === 'day') return d.getHours() + ':00';
+      if (view === 'week') return d.toLocaleDateString('en-US', { weekday: 'short' });
+      if (view === 'month') return d.getDate().toString();
+      return d.toLocaleString();
+    }
 
     async function loadData() {
-      const days = parseInt(document.getElementById('timeRange').value);
-      const cutoff = Date.now() - (days * 24 * 60 * 60 * 1000);
-      const snapshot = await db.ref('readings').orderByChild('timestamp').startAt(cutoff).get();
+      const now = new Date();
+      const view = viewSelect.value;
+      const groupMap = new Map();
 
-      const labels = [];
-      const tempData = [];
-      const bpmData = [];
-      const co2Data = [];
+      const snap = await db.ref('readings').orderByChild('timestamp').limitToLast(1000).get();
+      let last = null;
 
-      snapshot.forEach(child => {
+      snap.forEach(child => {
         const data = child.val();
-        const timeLabel = new Date(data.timestamp).toLocaleString();
-        labels.push(timeLabel);
-        tempData.push(data.temp || 0);
-        bpmData.push(data.bpm || 0);
-        co2Data.push(data.sco2 || 0);
+        const ts = data.timestamp;
+        if (!data.temp || !data.bpm || !data.sco2) return;
+        last = data;
+
+        const d = new Date(ts);
+
+        let label = '';
+        if (view === 'day') {
+          if (d.toDateString() !== now.toDateString()) return;
+          label = d.getHours();
+        } else if (view === 'week') {
+          const weekAgo = new Date();
+          weekAgo.setDate(now.getDate() - 7);
+          if (d < weekAgo) return;
+          label = d.toLocaleDateString('en-US', { weekday: 'short' });
+        } else if (view === 'month') {
+          const selected = new Date(monthPicker.value);
+          if (!monthPicker.value || d.getMonth() !== selected.getMonth() || d.getFullYear() !== selected.getFullYear()) return;
+          label = d.getDate();
+        }
+
+        if (!groupMap.has(label)) {
+          groupMap.set(label, { count: 0, temp: 0, bpm: 0, sco2: 0 });
+        }
+
+        const entry = groupMap.get(label);
+        entry.count++;
+        entry.temp += parseFloat(data.temp);
+        entry.bpm += parseInt(data.bpm);
+        entry.sco2 += parseFloat(data.sco2);
       });
 
-      updateChart(tempChart, labels, tempData);
-      updateChart(bpmChart, labels, bpmData);
-      updateChart(co2Chart, labels, co2Data);
-    }
+      if (last) updateLive(last);
 
-    function createChart(id, color) {
-      return new Chart(document.getElementById(id), {
-        type: 'line',
-        data: { labels: [], datasets: [{ data: [], borderColor: color, fill: false, tension: 0.2 }] },
-        options: { responsive: true, scales: { x: { ticks: { autoSkip: true, maxTicksLimit: 10 } }, y: { beginAtZero: true } } }
-      });
-    }
+      const labels = Array.from(groupMap.keys()).sort();
+      const temps = labels.map(l => (groupMap.get(l).temp / groupMap.get(l).count).toFixed(1));
+      const bpms = labels.map(l => Math.round(groupMap.get(l).bpm / groupMap.get(l).count));
+      const co2s = labels.map(l => (groupMap.get(l).sco2 / groupMap.get(l).count).toFixed(1));
 
-    function updateChart(chart, labels, data) {
       chart.data.labels = labels;
-      chart.data.datasets[0].data = data;
+      chart.data.datasets[0].data = temps;
+      chart.data.datasets[1].data = bpms;
+      chart.data.datasets[2].data = co2s;
       chart.update();
     }
 
+    setInterval(loadData, 3000);
     loadData();
   </script>
 </body>
