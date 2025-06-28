@@ -8,6 +8,8 @@
   <style>
     body { font-family: 'Montserrat', Arial, sans-serif; background: #f9fbfd; margin:0; }
     header { background: #45b1e7; color: #fff; text-align: center; padding: 2rem 0; }
+    .nav {text-align:center;margin-top:1em;}
+    .nav a { color: #45b1e7; text-decoration: none; margin: 0 0.7em; font-weight: bold;}
     .controls { text-align:center; margin:2em 0 1em 0;}
     .controls select, .controls input { font-size:1.05em; padding:0.3em 0.7em; margin:0 0.3em; border-radius:6px; border:1px solid #c7e3f6;}
     .dashboard { max-width:950px; margin: 0 auto; background:#fff; border-radius:15px; box-shadow:0 2px 12px #b2e1fa; padding:2em;}
@@ -16,6 +18,10 @@
   </style>
 </head>
 <body>
+  <div class="nav">
+    <a href="index.html">Live Reading</a> | 
+    <a href="patient-history.html">Patient History</a>
+  </div>
   <header>
     <h1>Patient History Dashboard</h1>
     <p>View historical readings from Google Sheets</p>
@@ -50,7 +56,7 @@
   </div>
   <script>
     // ==== Replace this with your Apps Script Web App URL ====
-    const API_URL = 'YOUR_SCRIPT_URL';
+    const API_URL = 'https://script.google.com/macros/s/AKfycbxMnmUiNFZJznjJoo_71NvW2FcCKFT9b-2zF3S0t1pRNz3eDPEfxEFctuMPkhgsNg-F/exec';
     // ========================================================
 
     let chartTemp = new Chart(document.getElementById('chartTemp'), {
