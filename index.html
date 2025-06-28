@@ -8,9 +8,9 @@
   <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-database-compat.js"></script>
   <style>
-    body { font-family: Arial, sans-serif; background: #eef2f5; margin: 0; padding: 20px; position: relative; }
-    h1 { text-align: center; margin-bottom: 20px; }
-    .live-data { text-align: center; margin-bottom: 30px; font-size: 1.5rem; }
+    body { font-family: Arial, sans-serif; background: #eef2f5; margin: 0; padding: 20px; }
+    h1 { text-align: center; margin-bottom: 10px; }
+    .live-data { text-align: center; font-size: 1.5rem; margin-bottom: 20px; }
     .live-data span { display: inline-block; min-width: 180px; }
     .filter { text-align: center; margin-bottom: 20px; }
     .filter select, .filter input {
@@ -18,45 +18,28 @@
     }
     .chart-container {
       max-width: 800px;
-      margin: 0 auto 50px auto;
+      margin: 0 auto 30px auto;
       background: #fff;
       padding: 20px;
       border-radius: 10px;
       box-shadow: 0 2px 5px rgba(0,0,0,0.1);
     }
-    #sos-alert {
-      display: none;
-      position: fixed;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      background-color: rgba(255, 0, 0, 0.9);
-      color: white;
-      font-size: 2rem;
-      z-index: 9999;
-      text-align: center;
-      padding-top: 40vh;
-      animation: blink 1s infinite;
-    }
-    @keyframes blink {
-      0%, 100% { background-color: rgba(255, 0, 0, 0.9); }
-      50% { background-color: rgba(200, 0, 0, 0.6); }
-    }
+    canvas { margin-top: 10px; }
   </style>
 </head>
 <body>
   <h1>Live Health Monitor</h1>
 
-  <div id="sos-alert">🚨 SOS ALERT TRIGGERED 🚨</div>
-
   <div class="live-data">
-    <div><span id="live-temp">Temp: --</span> <span id="live-bpm">BPM: --</span> <span id="live-co2">sCO₂: --</span></div>
+    <span id="live-temp">Temp: --°C</span>
+    <span id="live-bpm">BPM: --</span>
+    <span id="live-co2">sCO₂: --%</span>
   </div>
 
   <div class="filter">
     <label for="viewRange">View: </label>
     <select id="viewRange">
+      <option value="1min">Live (1 Minute)</option>
       <option value="day">Today</option>
       <option value="week">Week</option>
       <option value="month">Month</option>
@@ -65,10 +48,17 @@
   </div>
 
   <div class="chart-container">
-    <canvas id="chart"></canvas>
+    <h3>Temperature</h3>
+    <canvas id="chartTemp"></canvas>
   </div>
-
-  <audio id="sos-sound" src="https://www.soundjay.com/misc/sounds/bell-ringing-01.mp3"></audio>
+  <div class="chart-container">
+    <h3>BPM</h3>
+    <canvas id="chartBPM"></canvas>
+  </div>
+  <div class="chart-container">
+    <h3>sCO₂</h3>
+    <canvas id="chartCO2"></canvas>
+  </div>
 
   <script>
     const firebaseConfig = {
@@ -85,117 +75,82 @@
     firebase.initializeApp(firebaseConfig);
     const db = firebase.database();
 
-    const chartCanvas = document.getElementById('chart');
+    const charts = {
+      temp: new Chart(document.getElementById('chartTemp'), makeChartConfig('Temp (°C)', 'red', 0, 60)),
+      bpm: new Chart(document.getElementById('chartBPM'), makeChartConfig('BPM', 'blue', 0, 200)),
+      co2: new Chart(document.getElementById('chartCO2'), makeChartConfig('sCO₂ (%)', 'green', 0, 100))
+    };
+
     const viewSelect = document.getElementById('viewRange');
     const monthPicker = document.getElementById('monthPicker');
-    const sosBanner = document.getElementById('sos-alert');
-    const sosSound = document.getElementById('sos-sound');
-
-    const chart = new Chart(chartCanvas, {
-      type: 'line',
-      data: {
-        labels: [],
-        datasets: [
-          { label: 'Temp (°C)', data: [], borderColor: 'red', fill: false },
-          { label: 'BPM', data: [], borderColor: 'blue', fill: false },
-          { label: 'sCO₂ (ppm)', data: [], borderColor: 'green', fill: false }
-        ]
-      },
-      options: {
-        responsive: true,
-        scales: {
-          x: { title: { display: true, text: 'Time' } },
-          y: { beginAtZero: true }
-        }
-      }
-    });
 
     viewSelect.addEventListener('change', () => {
       monthPicker.style.display = viewSelect.value === 'month' ? 'inline-block' : 'none';
       loadData();
     });
-
     monthPicker.addEventListener('change', loadData);
-
-    function formatLabel(ts, view) {
-      const d = new Date(ts);
-      if (view === 'day') return d.getHours() + ':00';
-      if (view === 'week') return d.toLocaleDateString('en-US', { weekday: 'short' });
-      if (view === 'month') return d.getDate().toString();
-      return d.toLocaleString();
-    }
-
-    async function loadData() {
-      const now = new Date();
-      const view = viewSelect.value;
-      const groupMap = new Map();
-
-      const snap = await db.ref('readings').orderByChild('timestamp').limitToLast(1000).get();
-
-      snap.forEach(child => {
-        const data = child.val();
-        const ts = data.timestamp;
-        if (!data.temp || !data.bpm || !data.sco2) return;
-
-        const d = new Date(ts);
-        let label = '';
-
-        if (view === 'day') {
-          if (d.toDateString() !== now.toDateString()) return;
-          label = d.getHours();
-        } else if (view === 'week') {
-          const weekAgo = new Date();
-          weekAgo.setDate(now.getDate() - 7);
-          if (d < weekAgo) return;
-          label = d.toLocaleDateString('en-US', { weekday: 'short' });
-        } else if (view === 'month') {
-          const selected = new Date(monthPicker.value);
-          if (!monthPicker.value || d.getMonth() !== selected.getMonth() || d.getFullYear() !== selected.getFullYear()) return;
-          label = d.getDate();
-        }
-
-        if (!groupMap.has(label)) {
-          groupMap.set(label, { count: 0, temp: 0, bpm: 0, sco2: 0 });
-        }
-
-        const entry = groupMap.get(label);
-        entry.count++;
-        entry.temp += parseFloat(data.temp);
-        entry.bpm += parseInt(data.bpm);
-        entry.sco2 += parseFloat(data.sco2);
-      });
-
-      const labels = Array.from(groupMap.keys()).sort((a, b) => a - b);
-      const temps = labels.map(l => (groupMap.get(l).temp / groupMap.get(l).count).toFixed(1));
-      const bpms = labels.map(l => Math.round(groupMap.get(l).bpm / groupMap.get(l).count));
-      const co2s = labels.map(l => (groupMap.get(l).sco2 / groupMap.get(l).count).toFixed(1));
-
-      chart.data.labels = labels;
-      chart.data.datasets[0].data = temps;
-      chart.data.datasets[1].data = bpms;
-      chart.data.datasets[2].data = co2s;
-      chart.update();
-    }
 
     db.ref('readings').limitToLast(1).on('child_added', snapshot => {
       const data = snapshot.val();
       if (!data) return;
       document.getElementById('live-temp').textContent = `Temp: ${data.temp}°C`;
       document.getElementById('live-bpm').textContent = `BPM: ${data.bpm}`;
-      document.getElementById('live-co2').textContent = `sCO₂: ${data.sco2} ppm`;
+      document.getElementById('live-co2').textContent = `sCO₂: ${data.sco2}%`;
     });
 
-    // SOS Monitoring
-    db.ref("sos").on("value", snap => {
-      if (snap.val() === true) {
-        sosBanner.style.display = "block";
-        sosSound.play();
-      } else {
-        sosBanner.style.display = "none";
-        sosSound.pause();
-        sosSound.currentTime = 0;
-      }
-    });
+    function makeChartConfig(label, color, min, max) {
+      return {
+        type: 'line',
+        data: { labels: [], datasets: [{ label: label, data: [], borderColor: color, fill: false }] },
+        options: {
+          responsive: true,
+          scales: {
+            x: { title: { display: true, text: 'Time' } },
+            y: { min, max, beginAtZero: true }
+          }
+        }
+      };
+    }
+
+    async function loadData() {
+      const now = new Date();
+      const view = viewSelect.value;
+      const snap = await db.ref('readings').orderByChild('timestamp').limitToLast(1000).get();
+
+      const labels = [], temps = [], bpms = [], co2s = [];
+      snap.forEach(child => {
+        const data = child.val();
+        const ts = new Date(data.timestamp);
+        const timeLabel = ts.toLocaleTimeString();
+
+        if (view === '1min') {
+          if ((now - ts) > 60000) return;
+        } else if (view === 'day' && ts.toDateString() !== now.toDateString()) return;
+        else if (view === 'week') {
+          const weekAgo = new Date();
+          weekAgo.setDate(now.getDate() - 7);
+          if (ts < weekAgo) return;
+        } else if (view === 'month') {
+          const selected = new Date(monthPicker.value);
+          if (!monthPicker.value || ts.getMonth() !== selected.getMonth() || ts.getFullYear() !== selected.getFullYear()) return;
+        }
+
+        labels.push(timeLabel);
+        temps.push(parseFloat(data.temp));
+        bpms.push(parseInt(data.bpm));
+        co2s.push(parseFloat(data.sco2));
+      });
+
+      updateChart(charts.temp, labels, temps);
+      updateChart(charts.bpm, labels, bpms);
+      updateChart(charts.co2, labels, co2s);
+    }
+
+    function updateChart(chart, labels, values) {
+      chart.data.labels = labels;
+      chart.data.datasets[0].data = values;
+      chart.update();
+    }
 
     setInterval(loadData, 3000);
     loadData();
