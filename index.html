@@ -1,1 +1,980 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Shamz — Biomedical Engineer & IoT Developer</title>
+  <meta name="description" content="Portfolio of Shamz — building intelligent systems at the intersection of hardware, software, and healthcare." />
 
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+
+  <script src="https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.min.js"></script>
+
+  <style>
+    /* ─── RESET ─────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    /* ─── TOKENS ─────────────────────────────────────────────── */
+    :root {
+      --bg:        #040d1a;
+      --surface:   #071525;
+      --glass:     rgba(255,255,255,0.04);
+      --gb:        rgba(255,255,255,0.07);
+      --cyan:      #00d4ff;
+      --purple:    #7c3aed;
+      --green:     #10fca0;
+      --text:      #e8f0fc;
+      --muted:     #4a6080;
+      --font:      'Space Grotesk', sans-serif;
+      --mono:      'JetBrains Mono', monospace;
+      --r:         16px;
+    }
+
+    /* ─── SCROLLBAR ───────────────────────────────────────────── */
+    html { scroll-behavior: smooth; }
+    ::-webkit-scrollbar { width: 3px; }
+    ::-webkit-scrollbar-track { background: var(--bg); }
+    ::-webkit-scrollbar-thumb { background: var(--cyan); border-radius: 3px; }
+
+    /* ─── BASE ────────────────────────────────────────────────── */
+    body {
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      overflow-x: hidden;
+    }
+
+    /* ambient glow blobs */
+    body::before {
+      content: '';
+      position: fixed; inset: 0; z-index: 0; pointer-events: none;
+      background:
+        radial-gradient(ellipse 60% 40% at 10% 20%, rgba(0,212,255,0.055) 0%, transparent 70%),
+        radial-gradient(ellipse 50% 50% at 90% 80%, rgba(124,58,237,0.055) 0%, transparent 70%);
+    }
+
+    /* scanline texture */
+    body::after {
+      content: '';
+      position: fixed; inset: 0; z-index: 9000; pointer-events: none;
+      background: repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(0,0,0,0.04) 3px, rgba(0,0,0,0.04) 4px);
+    }
+
+    /* ─── CURSOR ──────────────────────────────────────────────── */
+    body { cursor: none; }
+    .cur-dot {
+      position: fixed; width: 8px; height: 8px; border-radius: 50%;
+      background: var(--cyan); pointer-events: none; z-index: 9999;
+      transition: transform 0.15s;
+      transform: translate(-50%, -50%);
+    }
+    .cur-ring {
+      position: fixed; width: 32px; height: 32px; border-radius: 50%;
+      border: 1px solid rgba(0,212,255,0.5); pointer-events: none; z-index: 9998;
+      transform: translate(-50%, -50%);
+      transition: width 0.3s, height 0.3s, border-color 0.3s;
+    }
+    a:hover ~ .cur-ring, button:hover ~ .cur-ring { width: 48px; height: 48px; border-color: var(--cyan); }
+
+    /* ─── NAV ─────────────────────────────────────────────────── */
+    nav {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 200;
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 1.4rem 4rem;
+      transition: background 0.4s, backdrop-filter 0.4s;
+    }
+    nav.stuck {
+      background: rgba(4,13,26,0.8);
+      backdrop-filter: blur(24px);
+      border-bottom: 1px solid var(--gb);
+    }
+    .nav-logo {
+      font-size: 1.3rem; font-weight: 700; letter-spacing: .12em;
+      color: var(--text); text-decoration: none;
+    }
+    .nav-logo b { color: var(--cyan); }
+    .nav-links { display: flex; gap: 2.5rem; list-style: none; }
+    .nav-links a {
+      font-family: var(--mono); font-size: .78rem; letter-spacing: .08em;
+      color: var(--muted); text-decoration: none;
+      transition: color .25s;
+      position: relative;
+    }
+    .nav-links a::after {
+      content: ''; position: absolute; bottom: -3px; left: 0;
+      width: 0; height: 1px; background: var(--cyan);
+      transition: width .3s;
+    }
+    .nav-links a:hover { color: var(--cyan); }
+    .nav-links a:hover::after { width: 100%; }
+
+    /* ─── HERO ────────────────────────────────────────────────── */
+    #hero {
+      position: relative; height: 100vh;
+      display: flex; align-items: center; justify-content: center;
+      overflow: hidden;
+    }
+    #hero-canvas {
+      position: absolute; inset: 0; z-index: 0;
+    }
+
+    /* ECG scan line across hero bottom */
+    .ecg-strip {
+      position: absolute; bottom: 90px; left: 0; right: 0; height: 48px;
+      overflow: hidden; z-index: 1; pointer-events: none; opacity: .35;
+    }
+    .ecg-strip svg { position: absolute; left: -100%; animation: ecgScroll 6s linear infinite; }
+    @keyframes ecgScroll { to { transform: translateX(100%); } }
+
+    .hero-content {
+      position: relative; z-index: 2; text-align: center;
+      padding: 0 1.5rem;
+    }
+    .hero-eyebrow {
+      font-family: var(--mono); font-size: .78rem; letter-spacing: .35em;
+      text-transform: uppercase; color: var(--cyan);
+      margin-bottom: 1.8rem;
+      animation: fadeUp .8s .2s both;
+    }
+    .hero-name {
+      font-size: clamp(5rem, 16vw, 13rem);
+      font-weight: 700; line-height: .9; letter-spacing: -.03em;
+      animation: fadeUp .8s .4s both;
+    }
+    .glitch-wrap {
+      display: inline-block; position: relative;
+    }
+    .glitch-wrap::before,
+    .glitch-wrap::after {
+      content: attr(data-text);
+      position: absolute; top: 0; left: 0; width: 100%;
+      font-size: inherit; font-weight: inherit; line-height: inherit;
+    }
+    .glitch-wrap::before {
+      color: var(--cyan);
+      clip-path: polygon(0 0,100% 0,100% 42%,0 42%);
+      animation: glitchTop 4s infinite;
+    }
+    .glitch-wrap::after {
+      color: var(--purple);
+      clip-path: polygon(0 60%,100% 60%,100% 100%,0 100%);
+      animation: glitchBot 4s infinite;
+    }
+    @keyframes glitchTop {
+      0%,89%,100%  { transform: none; opacity: 0; }
+      91%          { transform: translate(-4px, 2px); opacity: .9; }
+      93%          { transform: translate(4px,-2px); opacity: .9; }
+      95%          { transform: none; opacity: 0; }
+    }
+    @keyframes glitchBot {
+      0%,86%,100%  { transform: none; opacity: 0; }
+      88%          { transform: translate(4px, 3px); opacity: .9; }
+      90%          { transform: translate(-4px,-3px); opacity: .9; }
+      92%          { transform: none; opacity: 0; }
+    }
+
+    .hero-sub {
+      font-size: clamp(.95rem, 2.2vw, 1.3rem);
+      color: var(--muted); margin-top: 1.6rem;
+      animation: fadeUp .8s .7s both;
+    }
+    .hero-sub em { color: var(--text); font-style: normal; }
+    #typed-text { color: var(--cyan); }
+    .typed-cursor { color: var(--cyan); animation: blink 1s infinite; }
+    @keyframes blink { 50% { opacity: 0; } }
+
+    .hero-cta {
+      display: flex; gap: 1rem; justify-content: center;
+      margin-top: 3rem;
+      animation: fadeUp .8s 1s both;
+    }
+
+    .btn {
+      display: inline-flex; align-items: center; gap: .5rem;
+      padding: .75rem 1.9rem; border-radius: 50px; font-family: var(--font);
+      font-size: .9rem; font-weight: 600; text-decoration: none;
+      cursor: pointer; transition: all .3s; border: none;
+    }
+    .btn-primary {
+      background: linear-gradient(135deg, var(--cyan), var(--purple));
+      color: #fff;
+      box-shadow: 0 0 32px rgba(0,212,255,.3);
+    }
+    .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 0 52px rgba(0,212,255,.55); }
+    .btn-ghost {
+      background: var(--glass); border: 1px solid var(--gb); color: var(--text);
+    }
+    .btn-ghost:hover { border-color: var(--cyan); color: var(--cyan); transform: translateY(-2px); }
+
+    .hero-scroll {
+      position: absolute; bottom: 2rem; left: 50%; transform: translateX(-50%);
+      display: flex; flex-direction: column; align-items: center; gap: .5rem;
+      font-family: var(--mono); font-size: .68rem; color: var(--muted);
+      animation: fadeIn 1s 1.5s both;
+    }
+    .scroll-bar {
+      width: 1px; height: 44px;
+      background: linear-gradient(to bottom, var(--cyan), transparent);
+      animation: scrollPulse 2.2s infinite;
+    }
+    @keyframes scrollPulse {
+      0%   { transform: scaleY(0); transform-origin: top; }
+      50%  { transform: scaleY(1); transform-origin: top; }
+      51%  { transform-origin: bottom; }
+      100% { transform: scaleY(0); transform-origin: bottom; }
+    }
+    @keyframes fadeUp { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: none; } }
+    @keyframes fadeIn { to { opacity: 1; } }
+
+    /* ─── SECTION SHARED ──────────────────────────────────────── */
+    .section-wrap {
+      max-width: 1180px; margin: 0 auto;
+      padding: 7rem 2.5rem;
+      position: relative; z-index: 1;
+    }
+    .sec-label {
+      font-family: var(--mono); font-size: .72rem; letter-spacing: .3em;
+      text-transform: uppercase; color: var(--cyan);
+      margin-bottom: .8rem;
+    }
+    .sec-title {
+      font-size: clamp(2rem, 5vw, 3.4rem);
+      font-weight: 700; line-height: 1.1;
+    }
+    .sec-title span {
+      background: linear-gradient(100deg, var(--cyan), var(--purple));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    .sec-line {
+      width: 56px; height: 2px; margin-top: 1.4rem;
+      background: linear-gradient(to right, var(--cyan), var(--purple));
+    }
+
+    /* ─── ABOUT ───────────────────────────────────────────────── */
+    #about .section-wrap {
+      display: grid; grid-template-columns: 1fr 400px;
+      gap: 5rem; align-items: center;
+    }
+    .about-body p {
+      color: rgba(232,240,252,.65); line-height: 1.85;
+      font-size: 1.03rem; margin-bottom: 1.1rem;
+    }
+    .about-stats {
+      display: grid; grid-template-columns: 1fr 1fr;
+      gap: .9rem; margin-top: 2.2rem;
+    }
+    .stat-pill {
+      background: var(--glass); border: 1px solid var(--gb);
+      border-radius: var(--r); padding: 1.2rem 1rem;
+      text-align: center;
+    }
+    .stat-num {
+      font-size: 2.1rem; font-weight: 700;
+      background: linear-gradient(135deg, var(--cyan), var(--purple));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    .stat-lbl { font-size: .72rem; color: var(--muted); margin-top: .2rem; }
+
+    /* 3-D rotating cube */
+    .cube-stage {
+      perspective: 700px;
+      display: flex; align-items: center; justify-content: center;
+      height: 380px;
+    }
+    .cube-3d {
+      width: 170px; height: 170px; position: relative;
+      transform-style: preserve-3d;
+      animation: spinCube 11s linear infinite;
+    }
+    @keyframes spinCube {
+      from { transform: rotateX(-22deg) rotateY(0); }
+      to   { transform: rotateX(-22deg) rotateY(360deg); }
+    }
+    .face {
+      position: absolute; width: 170px; height: 170px;
+      border: 1px solid rgba(0,212,255,.3);
+      background: rgba(0,212,255,.025);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 2.6rem; border-radius: 10px;
+      backdrop-filter: blur(4px);
+    }
+    .f-front  { transform: translateZ(85px); }
+    .f-back   { transform: rotateY(180deg) translateZ(85px); }
+    .f-right  { transform: rotateY(90deg) translateZ(85px); }
+    .f-left   { transform: rotateY(-90deg) translateZ(85px); }
+    .f-top    { transform: rotateX(90deg) translateZ(85px); }
+    .f-bot    { transform: rotateX(-90deg) translateZ(85px); }
+
+    /* ─── PROJECTS ────────────────────────────────────────────── */
+    .proj-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1.3rem; margin-top: 3rem;
+    }
+    .proj-card {
+      position: relative; overflow: hidden;
+      background: var(--glass); border: 1px solid var(--gb);
+      border-radius: 20px; padding: 2rem;
+      transition: transform .35s, box-shadow .35s, border-color .35s;
+    }
+    .proj-card::before {
+      content: ''; position: absolute; inset: 0; border-radius: 20px;
+      background: radial-gradient(circle at var(--px,50%) var(--py,50%),
+        rgba(0,212,255,.09) 0%, transparent 60%);
+      opacity: 0; transition: opacity .4s;
+    }
+    .proj-card:hover { transform: translateY(-8px); border-color: rgba(0,212,255,.3); }
+    .proj-card:hover::before { opacity: 1; }
+    .proj-card:hover { box-shadow: 0 24px 60px rgba(0,0,0,.35), 0 0 0 1px rgba(0,212,255,.15); }
+    .proj-glow {
+      position: absolute; top: -40px; right: -40px;
+      width: 180px; height: 180px; border-radius: 50%;
+      filter: blur(55px); opacity: .07; pointer-events: none;
+    }
+    .proj-num {
+      font-family: var(--mono); font-size: .68rem; color: var(--cyan);
+      opacity: .6; margin-bottom: 1rem;
+    }
+    .proj-title { font-size: 1.3rem; font-weight: 700; margin-bottom: .7rem; }
+    .proj-desc {
+      color: rgba(232,240,252,.6); font-size: .93rem; line-height: 1.72;
+      margin-bottom: 1.4rem;
+    }
+    .proj-tags { display: flex; flex-wrap: wrap; gap: .45rem; margin-bottom: 1.4rem; }
+    .tag {
+      background: rgba(0,212,255,.07); border: 1px solid rgba(0,212,255,.2);
+      color: var(--cyan); font-family: var(--mono); font-size: .68rem;
+      padding: .2rem .65rem; border-radius: 20px;
+    }
+    .tag.purple { background: rgba(124,58,237,.07); border-color: rgba(124,58,237,.2); color: #a78bfa; }
+    .tag.green  { background: rgba(16,252,160,.07); border-color: rgba(16,252,160,.2); color: var(--green); }
+    .proj-links { display: flex; gap: 1.1rem; }
+    .proj-links a {
+      font-size: .82rem; color: var(--muted); text-decoration: none;
+      display: flex; align-items: center; gap: .35rem;
+      transition: color .25s;
+    }
+    .proj-links a:hover { color: var(--cyan); }
+
+    /* Featured (full-width) */
+    .proj-card.featured {
+      grid-column: 1 / -1;
+      display: grid; grid-template-columns: 1fr 1fr; gap: 2.5rem;
+    }
+
+    /* Live-data preview widget inside featured card */
+    .proj-preview {
+      display: flex; flex-direction: column; justify-content: center; gap: 1rem;
+      background: rgba(4,13,26,.8); border: 1px solid rgba(0,212,255,.1);
+      border-radius: 14px; padding: 1.6rem;
+    }
+    .prev-row { display: flex; align-items: center; gap: .9rem; }
+    .prev-lbl { font-family: var(--mono); font-size: .66rem; color: var(--muted); width: 55px; flex-shrink: 0; }
+    .prev-track { flex: 1; height: 5px; background: rgba(255,255,255,.05); border-radius: 3px; overflow: hidden; }
+    .prev-fill { height: 100%; border-radius: 3px; }
+    .prev-val { font-family: var(--mono); font-size: .72rem; width: 50px; text-align: right; }
+    .fc { background: var(--cyan); animation: beat 2.4s ease-in-out infinite; }
+    .fp { background: #a78bfa;    animation: beat 2.9s ease-in-out infinite; }
+    .fg { background: var(--green);animation: beat 3.2s ease-in-out infinite; }
+    @keyframes beat {
+      0%,100% { width: var(--w,70%); } 50% { width: calc(var(--w,70%) + 8%); }
+    }
+    .ecg-mini {
+      margin-top: .6rem; padding-top: 1rem;
+      border-top: 1px solid rgba(255,255,255,.05);
+    }
+    .ecg-mini svg { width: 100%; height: 46px; overflow: visible; }
+    .ecg-path { stroke-dasharray: 1000; stroke-dashoffset: 1000; animation: drawEcg 3s .5s forwards; }
+    @keyframes drawEcg { to { stroke-dashoffset: 0; } }
+    .ecg-mini p { font-family: var(--mono); font-size: .62rem; color: var(--muted); text-align: center; margin-top: .3rem; }
+
+    /* ─── SKILLS ──────────────────────────────────────────────── */
+    .skills-flex {
+      display: grid; grid-template-columns: repeat(4, 1fr);
+      gap: 1rem; margin-top: 3rem;
+    }
+    .skill-block {
+      background: var(--glass); border: 1px solid var(--gb);
+      border-radius: var(--r); padding: 1.4rem 1.2rem;
+      display: flex; align-items: center; gap: 1rem;
+      transition: all .3s; cursor: default;
+    }
+    .skill-block:hover { border-color: rgba(0,212,255,.4); background: rgba(0,212,255,.04); transform: translateY(-3px); }
+    .skill-icon { font-size: 1.75rem; flex-shrink: 0; }
+    .skill-info .s-name { font-size: .9rem; font-weight: 600; }
+    .skill-info .s-sub  { font-size: .7rem; color: var(--muted); font-family: var(--mono); margin-top: .15rem; }
+
+    /* ─── CONTACT ─────────────────────────────────────────────── */
+    #contact .section-wrap { text-align: center; max-width: 680px; }
+    .contact-desc { color: rgba(232,240,252,.6); font-size: 1.03rem; line-height: 1.8; margin: 1.4rem 0 2rem; }
+    .contact-email {
+      display: inline-block;
+      font-size: clamp(1.3rem, 3.5vw, 2rem); font-weight: 700;
+      color: var(--cyan); text-decoration: none;
+      position: relative; transition: opacity .3s;
+    }
+    .contact-email::after {
+      content: ''; position: absolute; bottom: -3px; left: 0;
+      width: 0; height: 2px; background: var(--cyan); transition: width .4s;
+    }
+    .contact-email:hover::after { width: 100%; }
+    .socials { display: flex; justify-content: center; gap: 1.1rem; margin-top: 2.5rem; }
+    .soc-btn {
+      width: 46px; height: 46px; border-radius: 12px;
+      display: flex; align-items: center; justify-content: center;
+      border: 1px solid var(--gb); color: var(--muted);
+      text-decoration: none; font-size: 1rem;
+      transition: all .3s;
+    }
+    .soc-btn:hover { border-color: var(--cyan); color: var(--cyan); transform: translateY(-3px); box-shadow: 0 10px 30px rgba(0,212,255,.15); }
+    .soc-btn svg { width: 17px; height: 17px; fill: currentColor; }
+
+    /* ─── DIVIDER ─────────────────────────────────────────────── */
+    .divider { border: none; border-top: 1px solid var(--gb); max-width: 1180px; margin: 0 auto; }
+
+    /* ─── FOOTER ──────────────────────────────────────────────── */
+    footer {
+      border-top: 1px solid var(--gb);
+      padding: 1.8rem 4rem;
+      display: flex; justify-content: space-between; align-items: center;
+      font-family: var(--mono); font-size: .72rem; color: var(--muted);
+      position: relative; z-index: 1;
+    }
+    footer a { color: var(--cyan); text-decoration: none; }
+
+    /* ─── SCROLL REVEAL ───────────────────────────────────────── */
+    .rev {
+      opacity: 0; transform: translateY(40px);
+      transition: opacity .7s ease, transform .7s ease;
+    }
+    .rev.on { opacity: 1; transform: none; }
+    .rev.d1 { transition-delay: .1s; }
+    .rev.d2 { transition-delay: .2s; }
+    .rev.d3 { transition-delay: .3s; }
+
+    /* ─── MOBILE ──────────────────────────────────────────────── */
+    @media (max-width: 1024px) {
+      .proj-grid { grid-template-columns: 1fr 1fr; }
+      .proj-card.featured { grid-column: 1 / -1; display: block; }
+      .proj-preview { margin-top: 1.5rem; }
+      .skills-flex { grid-template-columns: 1fr 1fr; }
+    }
+    @media (max-width: 768px) {
+      nav { padding: 1.2rem 1.5rem; }
+      .nav-links { gap: 1.5rem; }
+      .nav-links li:nth-child(3), .nav-links li:nth-child(4) { display: none; }
+      #about .section-wrap { grid-template-columns: 1fr; gap: 2rem; }
+      .cube-stage { height: 220px; }
+      .proj-grid { grid-template-columns: 1fr; }
+      .skills-flex { grid-template-columns: 1fr; }
+      footer { flex-direction: column; gap: .5rem; text-align: center; padding: 1.5rem; }
+    }
+  </style>
+</head>
+
+<body>
+
+  <!-- CURSOR -->
+  <div class="cur-dot" id="curDot"></div>
+  <div class="cur-ring" id="curRing"></div>
+
+  <!-- NAV -->
+  <nav id="nav">
+    <a href="#" class="nav-logo">SH<b>AMZ</b></a>
+    <ul class="nav-links">
+      <li><a href="#about">about</a></li>
+      <li><a href="#projects">projects</a></li>
+      <li><a href="#skills">skills</a></li>
+      <li><a href="#contact">contact</a></li>
+    </ul>
+  </nav>
+
+  <!-- ─── HERO ─────────────────────────────────────────────── -->
+  <section id="hero">
+    <canvas id="hero-canvas"></canvas>
+
+    <!-- ECG strip at bottom of hero -->
+    <div class="ecg-strip">
+      <svg width="600" height="48" viewBox="0 0 600 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <polyline
+          points="0,24 60,24 80,24 90,8 100,40 110,4 120,44 130,24 150,24 210,24 230,24 240,8 250,40 260,4 270,44 280,24 300,24 360,24 380,24 390,8 400,40 410,4 420,44 430,24 450,24 510,24 530,24 540,8 550,40 560,4 570,44 580,24 600,24"
+          stroke="#00d4ff" stroke-width="1.5" fill="none"/>
+      </svg>
+    </div>
+
+    <div class="hero-content">
+      <p class="hero-eyebrow">Biomedical Engineer &amp; IoT Developer</p>
+
+      <h1 class="hero-name">
+        <span class="glitch-wrap" data-text="SHAMZ">SHAMZ</span>
+      </h1>
+
+      <p class="hero-sub">
+        Building <em>intelligent systems</em> at the intersection of<br>
+        <span id="typed-text"></span><span class="typed-cursor">|</span>
+      </p>
+
+      <div class="hero-cta">
+        <a href="#projects" class="btn btn-primary">View Projects ↓</a>
+        <a href="#contact" class="btn btn-ghost">Get In Touch</a>
+      </div>
+    </div>
+
+    <div class="hero-scroll">
+      <div class="scroll-bar"></div>
+      <span>scroll</span>
+    </div>
+  </section>
+
+
+  <!-- ─── ABOUT ─────────────────────────────────────────────── -->
+  <section id="about">
+    <div class="section-wrap">
+      <!-- Left -->
+      <div class="about-body rev">
+        <p class="sec-label">About me</p>
+        <h2 class="sec-title">Engineering the<br><span>future of health</span></h2>
+        <div class="sec-line"></div>
+
+        <p style="margin-top:1.6rem">
+          I'm a developer who thrives at the crossroads of hardware and software.
+          From soldering sensors to deploying full-stack dashboards, I build
+          end-to-end systems that capture the world and make it legible.
+        </p>
+        <p>
+          My focus is biomedical IoT — real-time patient monitoring with
+          microcontrollers, cloud pipelines, and clean interfaces that
+          deliver critical data exactly when it's needed.
+        </p>
+        <p>
+          Currently building wearable health systems that stream vital signs
+          over WiFi, store them in the cloud, and surface them on dashboards
+          designed for clinical clarity.
+        </p>
+
+        <div class="about-stats">
+          <div class="stat-pill">
+            <div class="stat-num" data-count="3">0</div>
+            <div class="stat-lbl">Projects shipped</div>
+          </div>
+          <div class="stat-pill">
+            <div class="stat-num" data-count="8">0</div>
+            <div class="stat-lbl">Technologies</div>
+          </div>
+          <div class="stat-pill">
+            <div class="stat-num" data-count="1" data-suffix="Hz">0</div>
+            <div class="stat-lbl">Sensor sample rate</div>
+          </div>
+          <div class="stat-pill">
+            <div class="stat-num" data-count="99" data-suffix="%">0</div>
+            <div class="stat-lbl">Uptime target</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right: 3-D cube -->
+      <div class="cube-stage rev d2">
+        <div class="cube-3d">
+          <div class="face f-front">⚡</div>
+          <div class="face f-back">🧬</div>
+          <div class="face f-right">📡</div>
+          <div class="face f-left">💻</div>
+          <div class="face f-top">🔬</div>
+          <div class="face f-bot">📊</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ─── PROJECTS ──────────────────────────────────────────── -->
+  <section id="projects">
+    <div class="section-wrap">
+      <div class="rev">
+        <p class="sec-label">Featured Work</p>
+        <h2 class="sec-title">Projects that <span>push limits</span></h2>
+        <div class="sec-line"></div>
+      </div>
+
+      <div class="proj-grid">
+
+        <!-- ── FEATURED ── -->
+        <div class="proj-card featured rev" id="card-featured">
+          <div class="proj-glow" style="background:var(--cyan)"></div>
+
+          <div>
+            <div class="proj-num">01 — Featured Project</div>
+            <h3 class="proj-title">MediTrack Health Monitor</h3>
+            <p class="proj-desc">
+              Real-time patient vitals monitoring built on custom IoT hardware.
+              Streams temperature, heart rate, and blood-oxygen from wearable
+              sensors to Google Sheets via Apps Script, then renders live and
+              historical data on a responsive clinical dashboard.
+            </p>
+            <div class="proj-tags">
+              <span class="tag">ESP32</span>
+              <span class="tag">Arduino</span>
+              <span class="tag">JavaScript</span>
+              <span class="tag">Google Sheets API</span>
+              <span class="tag">Chart.js</span>
+              <span class="tag purple">IoT</span>
+              <span class="tag green">Healthcare</span>
+            </div>
+            <div class="proj-links">
+              <a href="patient-history.html">↗ History Dashboard</a>
+              <a href="https://github.com/shamzrepha/health_monitor" target="_blank" rel="noopener">↗ GitHub</a>
+            </div>
+          </div>
+
+          <!-- live data widget -->
+          <div class="proj-preview">
+            <div class="prev-row">
+              <span class="prev-lbl">TEMP</span>
+              <div class="prev-track"><div class="prev-fill fc" style="--w:71%"></div></div>
+              <span class="prev-val" style="color:var(--cyan)">36.8 °C</span>
+            </div>
+            <div class="prev-row">
+              <span class="prev-lbl">HEART</span>
+              <div class="prev-track"><div class="prev-fill fp" style="--w:64%"></div></div>
+              <span class="prev-val" style="color:#a78bfa">73 bpm</span>
+            </div>
+            <div class="prev-row">
+              <span class="prev-lbl">SpO₂</span>
+              <div class="prev-track"><div class="prev-fill fg" style="--w:94%"></div></div>
+              <span class="prev-val" style="color:var(--green)">97 %</span>
+            </div>
+
+            <div class="ecg-mini">
+              <svg viewBox="0 0 320 46" preserveAspectRatio="none">
+                <polyline class="ecg-path"
+                  points="0,23 30,23 50,23 60,8 70,38 78,3 88,43 98,23 120,23 150,23 170,23 180,8 190,38 198,3 208,43 218,23 240,23 270,23 290,23 300,8 310,38 318,3"
+                  fill="none" stroke="#00d4ff" stroke-width="1.6" stroke-linejoin="round"/>
+                <polyline
+                  points="0,30 30,30 50,30 60,22 70,34 78,20 88,38 98,30 120,30 150,30"
+                  fill="none" stroke="#10fca0" stroke-width="1" opacity=".35" stroke-linejoin="round"/>
+              </svg>
+              <p>Live sensor feed — ESP32 → Google Sheets → Chart.js</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── CARD 2 ── -->
+        <div class="proj-card rev d1">
+          <div class="proj-glow" style="background:var(--purple)"></div>
+          <div class="proj-num">02</div>
+          <h3 class="proj-title">Smart Alert Engine</h3>
+          <p class="proj-desc">
+            Threshold-based alert system that fires SMS notifications
+            when vitals deviate from safe ranges, with configurable
+            limits per patient and escalation tiers.
+          </p>
+          <div class="proj-tags">
+            <span class="tag">Node.js</span>
+            <span class="tag purple">WebSockets</span>
+            <span class="tag">SMS API</span>
+            <span class="tag green">Safety-critical</span>
+          </div>
+          <div class="proj-links">
+            <a href="#">↗ Case Study</a>
+            <a href="#">↗ GitHub</a>
+          </div>
+        </div>
+
+        <!-- ── CARD 3 ── -->
+        <div class="proj-card rev d2">
+          <div class="proj-glow" style="background:var(--green)"></div>
+          <div class="proj-num">03</div>
+          <h3 class="proj-title">BioSensor Firmware</h3>
+          <p class="proj-desc">
+            Ultra-low-power embedded firmware for multi-sensor health nodes.
+            72-hour battery life at 1 Hz sampling across temperature,
+            pulse-ox, and BPM channels.
+          </p>
+          <div class="proj-tags">
+            <span class="tag">C / C++</span>
+            <span class="tag purple">ESP32</span>
+            <span class="tag">I²C / SPI</span>
+            <span class="tag green">RTOS</span>
+          </div>
+          <div class="proj-links">
+            <a href="#">↗ Docs</a>
+            <a href="#">↗ GitHub</a>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ─── SKILLS ────────────────────────────────────────────── -->
+  <section id="skills">
+    <div class="section-wrap">
+      <div class="rev">
+        <p class="sec-label">Toolkit</p>
+        <h2 class="sec-title">Skills &amp; <span>Technologies</span></h2>
+        <div class="sec-line"></div>
+      </div>
+
+      <div class="skills-flex">
+        <div class="skill-block rev">
+          <span class="skill-icon">🔧</span>
+          <div class="skill-info">
+            <div class="s-name">Arduino / ESP32</div>
+            <div class="s-sub">Embedded Systems</div>
+          </div>
+        </div>
+        <div class="skill-block rev d1">
+          <span class="skill-icon">🌐</span>
+          <div class="skill-info">
+            <div class="s-name">JavaScript</div>
+            <div class="s-sub">Frontend & Backend</div>
+          </div>
+        </div>
+        <div class="skill-block rev d2">
+          <span class="skill-icon">📊</span>
+          <div class="skill-info">
+            <div class="s-name">Data Visualization</div>
+            <div class="s-sub">Chart.js, D3.js</div>
+          </div>
+        </div>
+        <div class="skill-block rev d3">
+          <span class="skill-icon">☁️</span>
+          <div class="skill-info">
+            <div class="s-name">Cloud / APIs</div>
+            <div class="s-sub">Google Cloud, REST</div>
+          </div>
+        </div>
+        <div class="skill-block rev">
+          <span class="skill-icon">💻</span>
+          <div class="skill-info">
+            <div class="s-name">HTML / CSS</div>
+            <div class="s-sub">Web Development</div>
+          </div>
+        </div>
+        <div class="skill-block rev d1">
+          <span class="skill-icon">🔬</span>
+          <div class="skill-info">
+            <div class="s-name">Biomedical Sensors</div>
+            <div class="s-sub">Temp · SpO₂ · ECG</div>
+          </div>
+        </div>
+        <div class="skill-block rev d2">
+          <span class="skill-icon">⚡</span>
+          <div class="skill-info">
+            <div class="s-name">C / C++</div>
+            <div class="s-sub">Firmware Dev</div>
+          </div>
+        </div>
+        <div class="skill-block rev d3">
+          <span class="skill-icon">📡</span>
+          <div class="skill-info">
+            <div class="s-name">IoT Protocols</div>
+            <div class="s-sub">MQTT · WiFi · BLE</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ─── CONTACT ───────────────────────────────────────────── -->
+  <section id="contact">
+    <div class="section-wrap">
+      <div class="rev">
+        <p class="sec-label">Get In Touch</p>
+        <h2 class="sec-title">Let's build something <span>remarkable</span></h2>
+        <div class="sec-line" style="margin-left:auto;margin-right:auto"></div>
+        <p class="contact-desc">
+          Got a project at the edge of hardware and software?<br>
+          Working on something in health tech? Let's talk.
+        </p>
+        <a href="mailto:shamzypre14@gmail.com" class="contact-email">
+          shamzypre14@gmail.com
+        </a>
+        <div class="socials">
+          <!-- GitHub -->
+          <a href="https://github.com/shamzrepha" target="_blank" rel="noopener" class="soc-btn" title="GitHub">
+            <svg viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+          </a>
+          <!-- LinkedIn -->
+          <a href="#" class="soc-btn" title="LinkedIn">
+            <svg viewBox="0 0 24 24"><path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 01-2.063-2.065 2.064 2.064 0 112.063 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/></svg>
+          </a>
+          <!-- X/Twitter -->
+          <a href="#" class="soc-btn" title="Twitter / X">
+            <svg viewBox="0 0 24 24"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
+          </a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── FOOTER ────────────────────────────────────────────── -->
+  <footer>
+    <span>Designed &amp; built by <a href="#">Shamz</a></span>
+    <span>2024 — <a href="https://github.com/shamzrepha/health_monitor" target="_blank" rel="noopener">Source</a></span>
+  </footer>
+
+
+  <!-- ─── SCRIPTS ───────────────────────────────────────────── -->
+  <script>
+  /* ── CURSOR ─────────────────────────────────────────────── */
+  const dot  = document.getElementById('curDot');
+  const ring = document.getElementById('curRing');
+  let rx = 0, ry = 0, mx = 0, my = 0;
+  document.addEventListener('mousemove', e => {
+    mx = e.clientX; my = e.clientY;
+    dot.style.left = mx + 'px';
+    dot.style.top  = my + 'px';
+  });
+  (function loopRing() {
+    rx += (mx - rx) * .13;
+    ry += (my - ry) * .13;
+    ring.style.left = rx + 'px';
+    ring.style.top  = ry + 'px';
+    requestAnimationFrame(loopRing);
+  })();
+
+  /* ── NAV STICK ──────────────────────────────────────────── */
+  const nav = document.getElementById('nav');
+  window.addEventListener('scroll', () => {
+    nav.classList.toggle('stuck', window.scrollY > 60);
+  }, { passive: true });
+
+  /* ── THREE.JS HERO ──────────────────────────────────────── */
+  (function heroGL() {
+    const canvas = document.getElementById('hero-canvas');
+    if (!window.THREE) return;
+
+    const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    renderer.setSize(innerWidth, innerHeight);
+
+    const scene  = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, .1, 1000);
+    camera.position.z = 5;
+
+    /* particles */
+    const N = 1400;
+    const pos = new Float32Array(N * 3);
+    for (let i = 0; i < N * 3; i++) pos[i] = (Math.random() - .5) * 22;
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    const pMat = new THREE.PointsMaterial({ color: 0x00d4ff, size: .022, transparent: true, opacity: .45 });
+    const pts  = new THREE.Points(geo, pMat);
+    scene.add(pts);
+
+    /* outer torus */
+    const tGeo = new THREE.TorusGeometry(2.1, .55, 14, 90);
+    const tMat = new THREE.MeshBasicMaterial({ color: 0x00d4ff, wireframe: true, transparent: true, opacity: .07 });
+    const tor  = new THREE.Mesh(tGeo, tMat);
+    scene.add(tor);
+
+    /* inner icosahedron */
+    const iGeo = new THREE.IcosahedronGeometry(1, 1);
+    const iMat = new THREE.MeshBasicMaterial({ color: 0x7c3aed, wireframe: true, transparent: true, opacity: .14 });
+    const ico  = new THREE.Mesh(iGeo, iMat);
+    scene.add(ico);
+
+    /* second torus (purple, perpendicular) */
+    const t2Geo = new THREE.TorusGeometry(1.4, .3, 10, 60);
+    const t2Mat = new THREE.MeshBasicMaterial({ color: 0x7c3aed, wireframe: true, transparent: true, opacity: .07 });
+    const tor2  = new THREE.Mesh(t2Geo, t2Mat);
+    tor2.rotation.x = Math.PI / 2;
+    scene.add(tor2);
+
+    let pmx = 0, pmy = 0;
+    window.addEventListener('mousemove', e => {
+      pmx = (e.clientX / innerWidth  - .5) * 2;
+      pmy = (e.clientY / innerHeight - .5) * 2;
+    });
+
+    window.addEventListener('resize', () => {
+      camera.aspect = innerWidth / innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(innerWidth, innerHeight);
+    });
+
+    function tick() {
+      requestAnimationFrame(tick);
+      const t = Date.now() * .001;
+      pts.rotation.y  =  t * .025;
+      pts.rotation.x  =  t * .008;
+      tor.rotation.x  =  t * .18 + pmy * .28;
+      tor.rotation.y  =  t * .12 + pmx * .28;
+      tor2.rotation.y =  t * .22;
+      tor2.rotation.z = -t * .16;
+      ico.rotation.x  = -t * .28;
+      ico.rotation.y  =  t * .38;
+      camera.position.x += (pmx * .6 - camera.position.x) * .03;
+      camera.position.y += (-pmy * .6 - camera.position.y) * .03;
+      camera.lookAt(0, 0, 0);
+      renderer.render(scene, camera);
+    }
+    tick();
+  })();
+
+  /* ── TYPEWRITER ──────────────────────────────────────────── */
+  const phrases = [
+    'hardware & software',
+    'health & technology',
+    'sensors & dashboards',
+    'circuits & the cloud'
+  ];
+  let pi = 0, ci = 0, del = false;
+  const typedEl = document.getElementById('typed-text');
+  function typeNext() {
+    const p = phrases[pi];
+    if (!del) {
+      typedEl.textContent = p.slice(0, ++ci);
+      if (ci === p.length) { del = true; return setTimeout(typeNext, 2200); }
+    } else {
+      typedEl.textContent = p.slice(0, --ci);
+      if (ci === 0) { del = false; pi = (pi + 1) % phrases.length; }
+    }
+    setTimeout(typeNext, del ? 45 : 95);
+  }
+  setTimeout(typeNext, 1600);
+
+  /* ── SCROLL REVEAL ───────────────────────────────────────── */
+  const revEls = document.querySelectorAll('.rev');
+  const io = new IntersectionObserver(entries => {
+    entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('on'); });
+  }, { threshold: .12 });
+  revEls.forEach(el => io.observe(el));
+
+  /* ── STAT COUNTERS ───────────────────────────────────────── */
+  const counters = document.querySelectorAll('.stat-num[data-count]');
+  const cio = new IntersectionObserver(entries => {
+    entries.forEach(e => {
+      if (!e.isIntersecting) return;
+      const target = +e.target.dataset.count;
+      const sfx    = e.target.dataset.suffix || '';
+      const isHz   = sfx === 'Hz';
+      let cur = 0;
+      const step = target / 55;
+      const id = setInterval(() => {
+        cur = Math.min(cur + step, target);
+        e.target.textContent = isHz ? cur.toFixed(1) + sfx : Math.floor(cur) + sfx;
+        if (cur >= target) clearInterval(id);
+      }, 22);
+      cio.unobserve(e.target);
+    });
+  }, { threshold: .5 });
+  counters.forEach(el => cio.observe(el));
+
+  /* ── CARD RADIAL SPOTLIGHT ───────────────────────────────── */
+  document.querySelectorAll('.proj-card').forEach(card => {
+    card.addEventListener('mousemove', e => {
+      const r = card.getBoundingClientRect();
+      card.style.setProperty('--px', ((e.clientX - r.left) / r.width  * 100) + '%');
+      card.style.setProperty('--py', ((e.clientY - r.top)  / r.height * 100) + '%');
+    });
+  });
+  </script>
+
+</body>
+</html>
